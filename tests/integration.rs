@@ -337,3 +337,68 @@ fn three_tasks_one_dropped_others_unaffected() {
 	drop(a);
 	drop(c);
 }
+
+// ============ 时间收益（并发 vs 串行） ============
+
+use std::time::{Duration, Instant};
+
+#[test]
+fn concurrent_tasks_overlap_in_time() {
+	let rt = tokio::runtime::Builder::new_current_thread()
+		.enable_time()
+		.build()
+		.unwrap();
+
+	let make = || {
+		StackRuntime::new(|ctx| {
+			ctx.block_on(tokio::time::sleep(Duration::from_millis(100)));
+		})
+		.unwrap()
+	};
+
+	let a = make();
+	let b = make();
+
+	let start = Instant::now();
+	rt.block_on(async { futures::future::join(a, b).await });
+	let elapsed = start.elapsed();
+
+	assert!(
+		elapsed < Duration::from_millis(150),
+		"两个 100ms sleep 应并发执行，实际耗时 {elapsed:?}"
+	);
+	assert!(
+		elapsed >= Duration::from_millis(100),
+		"至少要等一个 100ms sleep，实际 {elapsed:?}"
+	);
+}
+
+#[test]
+fn serial_tasks_take_full_time() {
+	let rt = tokio::runtime::Builder::new_current_thread()
+		.enable_time()
+		.build()
+		.unwrap();
+
+	let make = || {
+		StackRuntime::new(|ctx| {
+			ctx.block_on(tokio::time::sleep(Duration::from_millis(100)));
+		})
+		.unwrap()
+	};
+
+	let a = make();
+	let b = make();
+
+	let start = Instant::now();
+	rt.block_on(async {
+		a.await;
+		b.await;
+	});
+	let elapsed = start.elapsed();
+
+	assert!(
+		elapsed >= Duration::from_millis(180),
+		"两个 100ms sleep 串行应 ~200ms，实际 {elapsed:?}"
+	);
+}
