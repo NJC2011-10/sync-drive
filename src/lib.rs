@@ -19,3 +19,4 @@
 mod core;
 
 pub use core::{DEFAULT_STACK_SIZE, StackRuntime, SuspendCtx};
+pub use sync_drive_macro::blocking;
