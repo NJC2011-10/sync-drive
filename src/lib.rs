@@ -1,14 +1,14 @@
 //! 栈式协程桥接内核：让调用者用同步写法驱动异步操作，线程不被阻塞。
 //!
 //! # 快速开始
-//! ```ignore
+//! ```
 //! use sync_drive::StackRuntime;
 //!
-//! let (runtime, ctx) = StackRuntime::new(|ctx| {
-//!     let v = ctx.block_on(async_op());
-//!     v + 1
-//! });
-//! executor.spawn_local(runtime);
+//! let rt = StackRuntime::new(|ctx| {
+//!    let v = ctx.block_on(std::future::ready(1));
+//!    v + 1
+//! }).unwrap();
+//! assert_eq!(futures::executor::block_on(rt), 2);
 //! ```
 //!
 //! # 边界
