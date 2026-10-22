@@ -1,3 +1,4 @@
+use corosensei::stack::DefaultStack;
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -27,6 +28,12 @@ impl SuspendCtx {
 	/// # 调用约束
 	/// 必须在协程运行期间调用，否则 panic。
 	/// 支持重入：挂起的是整条栈，恢复精确回到最内层 suspend 点。
+	///
+	/// # Panics
+	/// 在以下情况 panic：
+	/// - 协程外调用（`yielder` 未设置）；
+	/// - `StackRuntime` 尚未 poll（`waker` 未设置）；
+	/// - 协程已结束或已 panic（`yielder` 已清空）。
 	pub fn block_on<F: Future>(&self, f: F) -> F::Output {
 		let mut f = Box::pin(f);
 		loop {
@@ -57,79 +64,76 @@ impl std::fmt::Debug for SuspendCtx {
 	}
 }
 
-enum TaskState<F, T> {
-	Fresh(F),
-	Running(Coroutine<(), (), T>),
+enum TaskState<T> {
+	Running(Coroutine<(), (), T, DefaultStack>),
 	Done,
 	Poisoned,
 }
 
 /// 栈所有者。实现 `Future`，由 executor 驱动。
-pub struct StackRuntime<F, T> {
-	state: TaskState<F, T>,
+pub struct StackRuntime<T> {
+	state: TaskState<T>,
 	inner: Rc<Inner>,
-	stack_size: usize,
 }
 
-impl<F, T> StackRuntime<F, T>
-where
-	F: FnOnce(SuspendCtx) -> T + 'static,
-{
-	/// 用默认栈大小创建。返回 `(runtime, ctx)`，两者指向同一条栈。
-	pub fn new(body: F) -> (Self, SuspendCtx) {
+impl<T: 'static> StackRuntime<T> {
+	/// 用默认栈大小创建。栈在此处分配，失败立即返回错误。
+	///
+	/// `body` 接收协程内部的 [`SuspendCtx`]。
+	///
+	/// # Errors
+	/// 栈分配失败（如内存不足）时返回 [`std::io::Error`]。
+	pub fn new<F>(body: F) -> Result<Self, std::io::Error>
+	where
+		F: FnOnce(SuspendCtx) -> T + 'static,
+	{
 		Self::with_stack_size(body, DEFAULT_STACK_SIZE)
 	}
 
-	/// 指定栈大小创建。
-	pub fn with_stack_size(body: F, stack_size: usize) -> (Self, SuspendCtx) {
+	/// 指定栈大小创建。栈在此处分配，失败立即返回错误。
+	///
+	/// # Errors
+	/// 栈分配失败（如内存不足、`stack_size` 无效）时返回 [`std::io::Error`]。
+	pub fn with_stack_size<F>(body: F, stack_size: usize) -> Result<Self, std::io::Error>
+	where
+		F: FnOnce(SuspendCtx) -> T + 'static,
+	{
 		let inner = Rc::new(Inner {
 			yielder: Cell::new(None),
 			waker: RefCell::new(None),
 		});
-		let ctx = SuspendCtx {
-			inner: inner.clone(),
-		};
-		let runtime = Self {
-			state: TaskState::Fresh(body),
+		let inner_for_co = inner.clone();
+		let stack = DefaultStack::new(stack_size)?;
+		let co = Coroutine::with_stack(stack, move |yielder, ()| {
+			inner_for_co.yielder.set(Some(NonNull::from(yielder)));
+			body(SuspendCtx {
+				inner: inner_for_co,
+			})
+		});
+		Ok(Self {
+			state: TaskState::Running(co),
 			inner,
-			stack_size,
-		};
-		(runtime, ctx)
+		})
 	}
 }
 
-impl<F, T> Future for StackRuntime<F, T>
-where
-	F: FnOnce(SuspendCtx) -> T + 'static,
-{
+impl<T> Future for StackRuntime<T> {
 	type Output = T;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-		// 状态机：Fresh -> Running -> {Done | Poisoned}。
+		// 状态机：Running -> {Done | Poisoned}。
 		// Running 时 resume 返回 Yield 则保持 Running；Return 转 Done；
 		// panic 经 catch_unwind 转 Poisoned 并 re-panic。
-		// SAFETY: 内部不做 pin projection；TaskState 各字段可自由移动。
+		// SAFETY: 内部不做 pin projection；Coroutine 可自由移动，协程栈在堆上。
 		let this = unsafe { self.get_unchecked_mut() };
 
 		match &this.state {
 			TaskState::Done => panic!("StackRuntime polled after completion"),
 			TaskState::Poisoned => panic!("StackRuntime polled after panic"),
-			_ => {}
+			TaskState::Running(_) => {}
 		}
 
 		*this.inner.waker.borrow_mut() = Some(cx.waker().clone());
-
-		if matches!(this.state, TaskState::Fresh(_)) {
-			let TaskState::Fresh(body) = std::mem::replace(&mut this.state, TaskState::Done) else {
-				unreachable!()
-			};
-			let inner = this.inner.clone();
-			let stack_size = this.stack_size;
-			this.state = TaskState::Running(Coroutine::new(stack_size, move |yielder, _| {
-				inner.yielder.set(Some(NonNull::from(yielder)));
-				body(SuspendCtx { inner })
-			}));
-		}
 
 		let result = {
 			let TaskState::Running(co) = &mut this.state else {
@@ -155,7 +159,7 @@ where
 	}
 }
 
-impl<F, T> Drop for StackRuntime<F, T> {
+impl<T> Drop for StackRuntime<T> {
 	fn drop(&mut self) {
 		// Coroutine 的 Drop 会展开协程栈，之后 yielder 失效；
 		// 清空以让 SuspendCtx 事后调用 block_on 时得到清晰 panic 而非 UB。
