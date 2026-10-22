@@ -156,7 +156,7 @@ fn block_on_after_completion_panics() {
 		r.expect_err("block_on after completion should panic")
 			.as_ref(),
 	);
-	assert!(msg.contains("coroutine not running"));
+	assert!(msg.contains("not inside resume"));
 }
 
 #[test]
@@ -401,4 +401,38 @@ fn serial_tasks_take_full_time() {
 		elapsed >= Duration::from_millis(180),
 		"两个 100ms sleep 串行应 ~200ms，实际 {elapsed:?}"
 	);
+}
+
+#[test]
+fn block_on_pending_while_suspended_panics() {
+	let slot: Rc<RefCell<Option<SuspendCtx>>> = Rc::new(RefCell::new(None));
+	let s = slot.clone();
+	let rt = StackRuntime::new(move |ctx| {
+		*s.borrow_mut() = Some(ctx.clone());
+		ctx.block_on(std::future::pending::<()>());
+	})
+	.unwrap();
+
+	let mut rt = Box::pin(rt);
+	let waker = noop_waker();
+	let mut cx = Context::from_waker(&waker);
+	assert!(rt.as_mut().poll(&mut cx).is_pending());
+
+	let ctx = slot.borrow().clone().expect("ctx not stored");
+	let r = catch_unwind(AssertUnwindSafe(|| {
+		ctx.block_on(std::future::pending::<()>());
+	}));
+	let msg = extract_panic_msg(r.expect_err("suspended block_on should panic").as_ref());
+	assert!(msg.contains("not inside resume"));
+}
+
+#[test]
+fn nested_block_on_works() {
+	let rt = StackRuntime::new(|ctx| {
+		ctx.block_on(async {
+			ctx.block_on(std::future::ready(1)) + ctx.block_on(std::future::ready(2))
+		})
+	})
+	.unwrap();
+	assert_eq!(block_on(rt), 3);
 }

@@ -16,6 +16,8 @@
 //! - 不支持跨 `await` 持有 `!Send` 资源以外的特殊语义。
 //! - 深递归受 `stack_size` 限制，用 `with_stack_size` 调整。
 
+extern crate self as sync_drive;
+
 mod core;
 
 pub use core::{DEFAULT_STACK_SIZE, StackRuntime, SuspendCtx};

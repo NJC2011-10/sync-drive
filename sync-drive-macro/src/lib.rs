@@ -22,9 +22,13 @@ pub fn blocking(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	let mut new_sig = sig.clone();
 	new_sig.asyncness = None;
 
-	// 2. 在参数列表最前面插入 ctx: &SuspendCtx
+	// 2. 插入 ctx: &SuspendCtx；方法（有 self）插到 self 之后
 	let ctx_arg: syn::FnArg = syn::parse_quote! { ctx: &::sync_drive::SuspendCtx };
-	new_sig.inputs.insert(0, ctx_arg);
+	let insert_at = usize::from(matches!(
+		new_sig.inputs.first(),
+		Some(syn::FnArg::Receiver(_))
+	));
+	new_sig.inputs.insert(insert_at, ctx_arg);
 
 	let expanded = quote! {
 		#(#attrs)*

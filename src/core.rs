@@ -14,6 +14,14 @@ pub const DEFAULT_STACK_SIZE: usize = 2 * 1024 * 1024;
 struct Inner {
 	yielder: Cell<Option<NonNull<Yielder<(), ()>>>>,
 	waker: RefCell<Option<Waker>>,
+	in_resume: Cell<bool>,
+}
+
+struct ResumeGuard<'a>(&'a Cell<bool>);
+impl Drop for ResumeGuard<'_> {
+	fn drop(&mut self) {
+		self.0.set(false);
+	}
 }
 
 /// 挂起能力的轻量句柄。`Clone` 廉价，所有克隆指向同一条栈。
@@ -42,12 +50,16 @@ impl SuspendCtx {
 			match f.as_mut().poll(&mut cx) {
 				Poll::Ready(v) => return v,
 				Poll::Pending => {
+					assert!(
+						self.inner.in_resume.get(),
+						"block_on: cannot suspend: not inside resume"
+					);
 					let y = self
 						.inner
 						.yielder
 						.get()
 						.expect("block_on: coroutine not running or already finished");
-					// SAFETY: yielder 由 StackRuntime 持有，suspend 期间存活；
+					// SAFETY: in_resume=true 保证协程正在 resume 中，栈帧有效；
 					// 单线程无并发访问。
 					unsafe { y.as_ref() }.suspend(());
 				}
@@ -101,6 +113,7 @@ impl<T: 'static> StackRuntime<T> {
 		let inner = Rc::new(Inner {
 			yielder: Cell::new(None),
 			waker: RefCell::new(None),
+			in_resume: Cell::new(false),
 		});
 		let inner_for_co = inner.clone();
 		let stack = DefaultStack::new(stack_size)?;
@@ -139,6 +152,8 @@ impl<T> Future for StackRuntime<T> {
 			let TaskState::Running(co) = &mut this.state else {
 				unreachable!()
 			};
+			this.inner.in_resume.set(true);
+			let _guard = ResumeGuard(&this.inner.in_resume);
 			// catch_unwind 只为毒化状态后 re-panic，不恢复执行。
 			catch_unwind(AssertUnwindSafe(|| co.resume(())))
 		};
@@ -164,5 +179,6 @@ impl<T> Drop for StackRuntime<T> {
 		// Coroutine 的 Drop 会展开协程栈，之后 yielder 失效；
 		// 清空以让 SuspendCtx 事后调用 block_on 时得到清晰 panic 而非 UB。
 		self.inner.yielder.set(None);
+		self.inner.in_resume.set(false);
 	}
 }

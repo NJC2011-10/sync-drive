@@ -89,3 +89,26 @@ fn macro_with_real_await() {
 		assert_eq!(task.await, 10);
 	});
 }
+
+struct Counter {
+	n: u32,
+}
+
+impl Counter {
+	#[blocking]
+	async fn bump(&mut self) -> u32 {
+		self.n += 1;
+		self.n
+	}
+}
+
+#[test]
+fn macro_on_method() {
+	let rt = StackRuntime::new(|ctx| {
+		let mut c = Counter { n: 0 };
+		c.bump(&ctx);
+		c.bump(&ctx)
+	})
+	.unwrap();
+	assert_eq!(block_on(rt), 2);
+}
