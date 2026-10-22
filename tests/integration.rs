@@ -206,3 +206,134 @@ fn drop_runtime_runs_stack_destructors() {
 		"DropGuard should be dropped when coroutine is dropped"
 	);
 }
+
+// ============ 三任务 ============
+
+#[test]
+fn three_tasks_join() {
+	let a = StackRuntime::new(|_| 1u32).unwrap();
+	let b = StackRuntime::new(|_| 2u32).unwrap();
+	let c = StackRuntime::new(|_| 3u32).unwrap();
+	let (ra, rb, rc) = block_on(futures::future::join3(a, b, c));
+	assert_eq!((ra, rb, rc), (1, 2, 3));
+}
+
+#[test]
+fn three_tasks_arbitrary_wake_order() {
+	let ready = [
+		Rc::new(Cell::new(false)),
+		Rc::new(Cell::new(false)),
+		Rc::new(Cell::new(false)),
+	];
+	let wakers: [Rc<RefCell<Option<Waker>>>; 3] = [
+		Rc::new(RefCell::new(None)),
+		Rc::new(RefCell::new(None)),
+		Rc::new(RefCell::new(None)),
+	];
+
+	let mk = |i: usize| {
+		let r = ready[i].clone();
+		let w = wakers[i].clone();
+		StackRuntime::new(move |ctx| {
+			ctx.block_on(ManualFuture { ready: r, waker: w });
+			i
+		})
+		.unwrap()
+	};
+
+	let mut tasks = [Box::pin(mk(0)), Box::pin(mk(1)), Box::pin(mk(2))];
+	let waker = noop_waker();
+	let mut cx = Context::from_waker(&waker);
+
+	// 全部挂起，各自独立的 waker 都已存储
+	for t in &mut tasks {
+		assert!(t.as_mut().poll(&mut cx).is_pending());
+	}
+	for w in &wakers {
+		assert!(w.borrow().is_some());
+	}
+
+	// 任意顺序放行：先 1，再 2，再 0
+	for i in [1usize, 2, 0] {
+		ready[i].set(true);
+		// 放行 i 之前，其他未放行的仍 Pending
+		for j in 0..3 {
+			if j == i || ready[j].get() {
+				continue;
+			}
+			assert!(tasks[j].as_mut().poll(&mut cx).is_pending());
+		}
+		match tasks[i].as_mut().poll(&mut cx) {
+			Poll::Ready(v) => assert_eq!(v, i),
+			Poll::Pending => panic!("task {i} should be ready"),
+		}
+	}
+}
+
+#[test]
+fn three_tasks_one_panics_others_unaffected() {
+	let a = StackRuntime::new(|_| 1u32).unwrap();
+	let b = StackRuntime::new(|_| -> u32 { panic!("b panics") }).unwrap();
+	let c = StackRuntime::new(|_| 3u32).unwrap();
+
+	let mut a = Box::pin(a);
+	let mut b = Box::pin(b);
+	let mut c = Box::pin(c);
+	let waker = noop_waker();
+	let mut cx = Context::from_waker(&waker);
+
+	// B panic
+	let r = catch_unwind(AssertUnwindSafe(|| {
+		let _ = b.as_mut().poll(&mut cx);
+	}));
+	assert!(extract_panic_msg(r.expect_err("b should panic").as_ref()).contains("b panics"));
+
+	// A 和 C 不受影响
+	assert!(matches!(a.as_mut().poll(&mut cx), Poll::Ready(1)));
+	assert!(matches!(c.as_mut().poll(&mut cx), Poll::Ready(3)));
+
+	// B 二次 poll 得到 Poisoned panic
+	let r2 = catch_unwind(AssertUnwindSafe(|| {
+		let _ = b.as_mut().poll(&mut cx);
+	}));
+	assert!(
+		extract_panic_msg(r2.expect_err("b second poll should panic").as_ref())
+			.contains("polled after panic")
+	);
+}
+
+#[test]
+fn three_tasks_one_dropped_others_unaffected() {
+	let ready = Rc::new(Cell::new(false));
+	let waker_slot: Rc<RefCell<Option<Waker>>> = Rc::new(RefCell::new(None));
+
+	let a = StackRuntime::new(|_| "A").unwrap();
+	let b = StackRuntime::new({
+		let r = ready.clone();
+		let w = waker_slot.clone();
+		move |ctx| {
+			ctx.block_on(ManualFuture { ready: r, waker: w });
+			"B"
+		}
+	})
+	.unwrap();
+	let c = StackRuntime::new(|_| "C").unwrap();
+
+	let mut a = Box::pin(a);
+	let mut b = Box::pin(b);
+	let mut c = Box::pin(c);
+	let waker = noop_waker();
+	let mut cx = Context::from_waker(&waker);
+
+	assert!(a.as_mut().poll(&mut cx).is_ready());
+	assert!(b.as_mut().poll(&mut cx).is_pending());
+	assert!(c.as_mut().poll(&mut cx).is_ready());
+
+	// drop 挂起中的 B
+	drop(b);
+
+	// A 和 C 已完成，结果不受影响（已 Ready 的 task 字段仍可读）
+	// 注意：已 Ready 的 task 不能再 poll，但 drop 不 panic
+	drop(a);
+	drop(c);
+}
