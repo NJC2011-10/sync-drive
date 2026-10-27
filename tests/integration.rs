@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
-use sync_drive::{StackRuntime, SuspendCtx};
+use sync_drive::{StackRuntime, StoreCtx};
 
 // ============ helpers ============
 
@@ -135,22 +135,20 @@ fn poll_after_panic() {
 
 #[test]
 fn block_on_after_completion_panics() {
-	let ctx_slot: Rc<RefCell<Option<SuspendCtx>>> = Rc::new(RefCell::new(None));
-	let slot = ctx_slot.clone();
+	let slot: Rc<RefCell<Option<StoreCtx>>> = Rc::new(RefCell::new(None));
+	let s = slot.clone();
 
 	let rt = StackRuntime::new(move |ctx| {
-		*slot.borrow_mut() = Some(ctx.clone());
+		*s.borrow_mut() = Some(ctx.to_store());
 		42u32
 	})
 	.unwrap();
 
 	assert_eq!(block_on(rt), 42);
 
-	let ctx = ctx_slot.borrow_mut().take().expect("ctx not stored");
+	let store = slot.borrow().clone().expect("store not stored");
 	let r = catch_unwind(AssertUnwindSafe(|| {
-		// 必须用会 Pending 的 future，逼 block_on 去查 yielder。
-		// ready(()) 第一次 poll 就 Ready，永远走不到 suspend，不触发 panic。
-		ctx.block_on(std::future::pending::<()>());
+		store.block_on(std::future::pending::<()>());
 	}));
 	let msg = extract_panic_msg(
 		r.expect_err("block_on after completion should panic")
@@ -161,20 +159,19 @@ fn block_on_after_completion_panics() {
 
 #[test]
 fn block_on_ready_after_completion_is_ok() {
-	let ctx_slot: Rc<RefCell<Option<SuspendCtx>>> = Rc::new(RefCell::new(None));
-	let slot = ctx_slot.clone();
+	let slot: Rc<RefCell<Option<StoreCtx>>> = Rc::new(RefCell::new(None));
+	let s = slot.clone();
 
 	let rt = StackRuntime::new(move |ctx| {
-		*slot.borrow_mut() = Some(ctx.clone());
+		*s.borrow_mut() = Some(ctx.to_store());
 		42u32
 	})
 	.unwrap();
 
 	assert_eq!(block_on(rt), 42);
 
-	let ctx = ctx_slot.borrow_mut().take().unwrap();
-	// future 不需要挂起，所以不需要 yielder，能正常返回
-	assert_eq!(ctx.block_on(std::future::ready(7)), 7);
+	let store = slot.borrow().clone().expect("store not stored");
+	assert_eq!(store.block_on(std::future::ready(7u32)), 7);
 }
 
 #[test]
@@ -405,10 +402,11 @@ fn serial_tasks_take_full_time() {
 
 #[test]
 fn block_on_pending_while_suspended_panics() {
-	let slot: Rc<RefCell<Option<SuspendCtx>>> = Rc::new(RefCell::new(None));
+	let slot: Rc<RefCell<Option<StoreCtx>>> = Rc::new(RefCell::new(None));
 	let s = slot.clone();
+
 	let rt = StackRuntime::new(move |ctx| {
-		*s.borrow_mut() = Some(ctx.clone());
+		*s.borrow_mut() = Some(ctx.to_store());
 		ctx.block_on(std::future::pending::<()>());
 	})
 	.unwrap();
@@ -418,9 +416,9 @@ fn block_on_pending_while_suspended_panics() {
 	let mut cx = Context::from_waker(&waker);
 	assert!(rt.as_mut().poll(&mut cx).is_pending());
 
-	let ctx = slot.borrow().clone().expect("ctx not stored");
+	let store = slot.borrow().clone().expect("store not stored");
 	let r = catch_unwind(AssertUnwindSafe(|| {
-		ctx.block_on(std::future::pending::<()>());
+		store.block_on(std::future::pending::<()>());
 	}));
 	let msg = extract_panic_msg(r.expect_err("suspended block_on should panic").as_ref());
 	assert!(msg.contains("not inside resume"));

@@ -23,7 +23,7 @@ pub fn blocking(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	new_sig.asyncness = None;
 
 	// 2. 插入 ctx: &SuspendCtx；方法（有 self）插到 self 之后
-	let ctx_arg: syn::FnArg = syn::parse_quote! { ctx: &::sync_drive::SuspendCtx };
+	let ctx_arg: syn::FnArg = syn::parse_quote! { ctx: &::sync_drive::SuspendCtx<'_> };
 	let insert_at = usize::from(matches!(
 		new_sig.inputs.first(),
 		Some(syn::FnArg::Receiver(_))
