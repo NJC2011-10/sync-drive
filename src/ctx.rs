@@ -1,10 +1,10 @@
 //! 普通路径的借用句柄。
 
-use crate::inner::Inner;
+use crate::handle::SuspendCapability;
+use crate::inner::{Inner, SuspendError};
 use crate::store::StoreCtx;
 use corosensei::Yielder;
 use std::cell::Cell;
-use std::future::Future;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
@@ -14,20 +14,17 @@ pub struct SuspendCtx<'a> {
 	pub(crate) inner: Rc<Inner>,
 }
 
-impl SuspendCtx<'_> {
-	/// 在协程内同步驱动 Future。`Pending` 时 `suspend`，`Ready` 时返回。
-	///
-	/// # Panics
-	/// 若 `waker` 未设置（`SuspendCtx` 路径理论上不会发生）。
-	pub fn block_on<F: Future>(&self, f: F) -> F::Output {
-		self.inner
-			.run_until_ready(f, || {
-				self.yielder.suspend(());
-				Ok(())
-			})
-			.unwrap_or_else(|e| panic!("SuspendCtx::block_on: {e}"))
+impl SuspendCapability for SuspendCtx<'_> {
+	fn inner(&self) -> &Inner {
+		&self.inner
 	}
 
+	fn with_yielder<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError> {
+		Ok(f(self.yielder))
+	}
+}
+
+impl SuspendCtx<'_> {
 	/// 擦除生命周期，产生可逃逸的 [`StoreCtx`]。
 	#[must_use]
 	pub fn to_store(&self) -> StoreCtx {

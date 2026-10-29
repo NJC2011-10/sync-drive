@@ -3,11 +3,13 @@
 extern crate self as sync_drive;
 
 mod ctx;
+mod handle;
 mod inner;
 mod runtime;
 mod store;
 
 pub use ctx::SuspendCtx;
+pub use handle::SuspendHandle;
 pub use runtime::StackRuntime;
 pub use store::StoreCtx;
 pub use sync_drive_macro::blocking;

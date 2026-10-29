@@ -8,7 +8,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
-use sync_drive::{StackRuntime, StoreCtx};
+use std::time::{Duration, Instant};
+use sync_drive::{StackRuntime, StoreCtx, SuspendHandle};
 
 // ============ helpers ============
 
@@ -337,8 +338,6 @@ fn three_tasks_one_dropped_others_unaffected() {
 
 // ============ 时间收益（并发 vs 串行） ============
 
-use std::time::{Duration, Instant};
-
 #[test]
 fn concurrent_tasks_overlap_in_time() {
 	let rt = tokio::runtime::Builder::new_current_thread()
@@ -433,4 +432,40 @@ fn nested_block_on_works() {
 	})
 	.unwrap();
 	assert_eq!(block_on(rt), 3);
+}
+
+#[test]
+fn suspend_during_unwind_returns_panicking() {
+	struct D {
+		store: StoreCtx,
+		hit: Rc<Cell<bool>>,
+	}
+	impl Drop for D {
+		fn drop(&mut self) {
+			let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+				self.store.block_on(std::future::pending::<()>());
+			}));
+			let msg = extract_panic_msg(r.expect_err("should panic").as_ref());
+			if msg.contains("panic unwinding") {
+				self.hit.set(true);
+			}
+		}
+	}
+
+	let hit = Rc::new(Cell::new(false));
+	let h = hit.clone();
+
+	let rt = StackRuntime::new(move |ctx| {
+		let _d = D {
+			store: ctx.to_store(),
+			hit: h,
+		};
+		panic!("boom");
+	})
+	.unwrap();
+
+	let _ = catch_unwind(AssertUnwindSafe(|| {
+		let _ = block_on(rt);
+	}));
+	assert!(hit.get(), "panicking check should fire");
 }

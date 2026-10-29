@@ -1,9 +1,9 @@
 //! 逃逸路径的句柄。唯一不安全点在这里。
 
+use crate::handle::SuspendCapability;
 use crate::inner::{Inner, Lifecycle, SuspendError};
 use corosensei::Yielder;
 use std::cell::Cell;
-use std::future::Future;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
@@ -14,30 +14,28 @@ pub struct StoreCtx {
 	pub(crate) inner: Rc<Inner>,
 }
 
-impl StoreCtx {
-	/// 在协程内同步驱动 Future。`Pending` 时三项检查后 `suspend`，`Ready` 时返回。
-	///
-	/// # Panics
-	/// - 协程未启动、挂起中、已结束或已 panic（`lifecycle != Running`）；
-	/// - 处于 panic 展开中；
-	/// - `yielder` 指针已清空。
-	pub fn block_on<F: Future>(&self, f: F) -> F::Output {
-		self.inner
-			.run_until_ready(f, || {
-				match self.inner.lifecycle.get() {
-					Lifecycle::Running => {}
-					other => return Err(SuspendError::NotInResume(other)),
-				}
-				if std::thread::panicking() {
-					return Err(SuspendError::Panicking);
-				}
-				let ptr = self.yielder.get().ok_or(SuspendError::YielderCleared)?;
-				// SAFETY: lifecycle == Running 保证协程正在 resume 内，栈帧有效；
-				// 非 panicking 保证不在 unwind 中切栈；指针非空。&Yielder 是
-				// 闭包局部，不逃逸。
-				unsafe { ptr.as_ref() }.suspend(());
-				Ok(())
-			})
-			.unwrap_or_else(|e| panic!("StoreCtx::block_on: {e}"))
+impl SuspendCapability for StoreCtx {
+	fn inner(&self) -> &Inner {
+		&self.inner
+	}
+
+	fn with_yielder<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError> {
+		match self.inner.lifecycle.get() {
+			Lifecycle::Running => {}
+			other => return Err(SuspendError::NotInResume(other)),
+		}
+		let sp = psm::stack_pointer() as usize;
+		match self.inner.trap_check.get() {
+			Some(check) if check(sp) => {}
+			_ => return Err(SuspendError::WrongStack),
+		}
+		let ptr = self
+			.yielder
+			.get()
+			.expect("StoreCtx yielder is never cleared");
+		// SAFETY: lifecycle == Running 且 SP 在本协程栈内 ⟹ 栈帧有效；
+		// 指针非空。panicking 已由 suspend_with 检查。
+		// HRTB 闭包约束保证 &Yielder 不逃逸。
+		Ok(f(unsafe { ptr.as_ref() }))
 	}
 }

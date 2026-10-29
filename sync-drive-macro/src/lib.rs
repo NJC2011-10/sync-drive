@@ -33,7 +33,7 @@ pub fn blocking(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	let expanded = quote! {
 		#(#attrs)*
 		#vis #new_sig {
-			ctx.block_on(async move #body)
+			::sync_drive::SuspendHandle::block_on(ctx, async move #body)
 		}
 	};
 

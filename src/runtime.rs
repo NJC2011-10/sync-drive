@@ -41,6 +41,9 @@ impl<T: 'static> StackRuntime<T> {
 	///
 	/// # Errors
 	/// 栈分配失败时返回 [`std::io::Error`]。
+	///
+	/// # Panics
+	/// 如果 `trap_check` 已被设置过（不应发生，属于内部构造逻辑错误），则会 panic。
 	pub fn with_stack_size<F>(body: F, stack_size: usize) -> Result<Self, std::io::Error>
 	where
 		F: FnOnce(SuspendCtx<'_>) -> T + 'static,
@@ -54,6 +57,15 @@ impl<T: 'static> StackRuntime<T> {
 				inner: inner_for_co,
 			})
 		});
+
+		// 捕获 trap handler，类型擦除后存入 Inner，供 StoreCtx 的 SP 检查使用。
+		let handler = co.trap_handler();
+		inner
+			.trap_check
+			.set(Box::new(move |sp| handler.stack_ptr_in_bounds(sp)))
+			.ok()
+			.expect("trap_check set exactly once at construction");
+
 		Ok(Self {
 			state: TaskState::Running(co),
 			inner,
