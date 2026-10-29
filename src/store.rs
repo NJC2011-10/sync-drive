@@ -15,6 +15,7 @@ pub struct StoreCtx {
 }
 
 impl SuspendCapability for StoreCtx {
+	#[inline]
 	fn inner(&self) -> &Inner {
 		&self.inner
 	}

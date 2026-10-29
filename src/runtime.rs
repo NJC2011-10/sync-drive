@@ -39,6 +39,7 @@ impl<T: 'static> StackRuntime<T> {
 	///
 	/// # Errors
 	/// 栈分配失败时返回 [`std::io::Error`]。
+	#[inline]
 	pub fn new<F>(body: F) -> Result<Self, std::io::Error>
 	where
 		F: FnOnce(SuspendCtx<'_>) -> T + 'static,
@@ -51,6 +52,7 @@ impl<T: 'static> StackRuntime<T> {
 	///
 	/// # Errors
 	/// 栈分配失败时返回 [`std::io::Error`]。
+	#[inline]
 	pub fn with_stack_size<F>(body: F, stack_size: usize) -> Result<Self, std::io::Error>
 	where
 		F: FnOnce(SuspendCtx<'_>) -> T + 'static,
@@ -120,6 +122,7 @@ impl<T: 'static> StackRuntime<T> {
 	/// `lifecycle` 若仍为 `Running` / `Suspended`，被写为 `Done`；
 	/// 逃逸的 [`StoreCtx`](crate::StoreCtx) 此后再调 `block_on` 会得到
 	/// `NotInResume(Done)`。
+	#[inline]
 	#[must_use]
 	pub fn into_stack(mut self) -> Option<DefaultStack> {
 		self.coroutine.take().map(Coroutine::into_stack)

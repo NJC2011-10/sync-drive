@@ -21,11 +21,12 @@ pub(crate) enum Lifecycle {
 }
 
 /// `run_until_ready` / `suspend_with` 的失败原因。
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum SuspendError {
 	/// lifecycle 不是 Running。携带实际状态便于诊断。
 	NotInResume(Lifecycle),
-	/// 处于 panic 展开中，不能在 unwind 中切栈。
+	/// 处于 panic 展开中。`block_on` 路径下：有 `catch_unwind` 包裹时被捕获，
+	/// 无包裹时 double panic → abort。不是“正常错误”，是“契约违反后的终止”。
 	Panicking,
 	/// 当前 SP 不在本协程的栈范围内。
 	WrongStack,

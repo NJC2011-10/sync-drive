@@ -15,10 +15,12 @@ pub struct SuspendCtx<'a> {
 }
 
 impl SuspendCapability for SuspendCtx<'_> {
+	#[inline]
 	fn inner(&self) -> &Inner {
 		&self.inner
 	}
 
+	#[inline]
 	fn with_yielder<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError> {
 		Ok(f(self.yielder))
 	}
@@ -26,6 +28,7 @@ impl SuspendCapability for SuspendCtx<'_> {
 
 impl SuspendCtx<'_> {
 	/// 擦除生命周期，产生可逃逸的 [`StoreCtx`]。
+	#[inline]
 	#[must_use]
 	pub fn to_store(&self) -> StoreCtx {
 		StoreCtx {
