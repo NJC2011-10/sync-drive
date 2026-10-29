@@ -2,6 +2,9 @@
 name = "sync-drive"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/NJC2011-10/sync-drive"
+description = "Stackful coroutine bridge: sync facade over async, for C API engines"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 corosensei = "0.3.4"
