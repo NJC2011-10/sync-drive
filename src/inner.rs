@@ -50,6 +50,7 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
+	#[inline]
 	pub(crate) fn new() -> Self {
 		Self {
 			waker: RefCell::new(None),
@@ -58,10 +59,14 @@ impl Inner {
 		}
 	}
 
+	#[inline]
 	pub(crate) fn set_waker(&self, w: &Waker) {
 		*self.waker.borrow_mut() = Some(w.clone());
 	}
 
+	/// # Panics
+	/// 若 `waker` 未设置（`body` 执行前未 `set_waker`，属内部不变量违反）。
+	#[inline]
 	pub(crate) fn get_waker(&self) -> Waker {
 		self.waker
 			.borrow()
@@ -93,6 +98,10 @@ impl Inner {
 	}
 
 	/// 同步转异步：resume 协程一次，显式写 `lifecycle`，panic 原样返回。
+	///
+	/// # Panics
+	/// 若协程已处于 `Done` / `Poisoned` 状态（绕过 `poll` 直接调用），
+	/// `Coroutine::resume` 会 panic。正常调用路径（`poll`）已在顶部检查状态。
 	pub(crate) fn resume_once<T>(
 		&self,
 		co: &mut Coroutine<(), (), T, DefaultStack>,

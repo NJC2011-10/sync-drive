@@ -56,7 +56,7 @@ impl<H: SuspendCapability> SuspendHandle for H {
 	fn block_on<F: Future>(&self, f: F) -> F::Output {
 		self.inner()
 			.run_until_ready(f, || self.suspend_with(|y| y.suspend(())))
-			.unwrap_or_else(|e| unreachable_suspend("block_on", &e))
+			.unwrap_or_else(|e| unreachable_suspend("block_on", e))
 	}
 
 	#[inline]
@@ -66,7 +66,7 @@ impl<H: SuspendCapability> SuspendHandle for H {
 		R: Send,
 	{
 		self.suspend_with(|y| y.on_parent_stack(f))
-			.unwrap_or_else(|e| unreachable_suspend("on_parent_stack", &e))
+			.unwrap_or_else(|e| unreachable_suspend("on_parent_stack", e))
 	}
 }
 
@@ -75,6 +75,6 @@ impl<H: SuspendCapability> SuspendHandle for H {
 /// `SuspendError::Panicking` 意味着当前在 unwind 中：若 `block_on` 被
 /// `catch_unwind` 包裹，panic 被捕获；否则 double panic 后由 Rust 运行时 abort。
 #[cold]
-fn unreachable_suspend(api: &str, e: &SuspendError) -> ! {
+fn unreachable_suspend(api: &str, e: SuspendError) -> ! {
 	panic!("{api}: {e}");
 }

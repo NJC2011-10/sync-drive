@@ -162,6 +162,7 @@ impl<T> Future for StackRuntime<T> {
 }
 
 impl<T> Drop for StackRuntime<T> {
+	#[inline]
 	fn drop(&mut self) {
 		// coroutine 由 Option 自动 drop，这里只更新 lifecycle：
 		// 标记 Done 让逃逸的 StoreCtx 事后调用 block_on 得到 NotInResume(Done) 而非 UB。
@@ -171,5 +172,17 @@ impl<T> Drop for StackRuntime<T> {
 			}
 			Lifecycle::Done | Lifecycle::Poisoned => {}
 		}
+	}
+}
+
+#[cfg(test)]
+mod pin_tests {
+	use super::StackRuntime;
+
+	fn assert_unpin<T: Unpin>() {}
+
+	#[test]
+	fn stack_runtime_is_unpin() {
+		assert_unpin::<StackRuntime<()>>();
 	}
 }

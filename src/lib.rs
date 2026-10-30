@@ -16,15 +16,3 @@ pub use sync_drive_macro::blocking;
 
 /// 默认协程栈大小。
 pub const DEFAULT_STACK_SIZE: usize = 2 * 1024 * 1024;
-
-#[cfg(test)]
-mod pin_tests {
-	use super::StackRuntime;
-
-	fn assert_unpin<T: Unpin>() {}
-
-	#[test]
-	fn stack_runtime_is_unpin() {
-		assert_unpin::<StackRuntime<()>>();
-	}
-}
