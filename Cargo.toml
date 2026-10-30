@@ -1,19 +1,12 @@
-[package]
-name = "sync-drive"
+[workspace]
+members = ["crates/sync-drive", "crates/sync-drive-macro"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/NJC2011-10/sync-drive"
-description = "Stackful coroutine bridge: sync facade over async, for C API engines"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/NJC2011-10/sync-drive"
 
-[dependencies]
-corosensei = "0.3.4"
-psm = "0.1.32"
-sync-drive-macro = { version = "0.1.0", path = "sync-drive-macro" }
-
-[dev-dependencies]
-futures = "0.3.34"
-tokio = { version = "1.54.1", features = ["rt", "time"] }
-
-[workspace]
-members = ["sync-drive-macro"]
+[workspace.dependencies]
+sync-drive-macro = { path = "crates/sync-drive-macro", version = "0.1.0" }

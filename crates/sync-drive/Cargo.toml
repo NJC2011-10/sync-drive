@@ -1,0 +1,16 @@
+[package]
+name = "sync-drive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stackful coroutine bridge: sync facade over async, for C API engines"
+
+[dependencies]
+corosensei = "0.3.4"
+psm = "0.1.32"
+sync-drive-macro = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3.34"
+tokio = { version = "1.54.1", features = ["rt", "time"] }
