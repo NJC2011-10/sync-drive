@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
-use sync_drive::{StackRuntime, StoreCtx, SuspendHandle};
+use sync_drive::{Lifecycle, StackRuntime, StoreCtx, SuspendError, SuspendHandle};
 
 // ============ helpers ============
 
@@ -468,4 +468,61 @@ fn suspend_during_unwind_returns_panicking() {
 		let _ = block_on(rt);
 	}));
 	assert!(hit.get(), "panicking check should fire");
+}
+
+#[test]
+fn try_block_on_returns_err_instead_of_panic() {
+	let slot: Rc<RefCell<Option<StoreCtx>>> = Rc::new(RefCell::new(None));
+	let s = slot.clone();
+	let rt = StackRuntime::new(move |ctx| {
+		*s.borrow_mut() = Some(ctx.to_store());
+		42u32
+	})
+	.unwrap();
+
+	assert_eq!(block_on(rt), 42);
+
+	let store = slot.borrow().clone().unwrap();
+	match store.try_block_on(std::future::pending::<()>()) {
+		Ok(()) => panic!("should return Err"),
+		Err(SuspendError::NotInResume(Lifecycle::Done)) => {} // ✅
+		Err(e) => panic!("unexpected: {e}"),
+	}
+}
+
+#[test]
+fn lifecycle_reflects_state() {
+	let captured = Rc::new(Cell::new(Lifecycle::NotStarted));
+	let c = captured.clone();
+	let rt = StackRuntime::new(move |ctx| {
+		c.set(ctx.lifecycle());
+	})
+	.unwrap();
+	block_on(rt);
+	assert_eq!(captured.get(), Lifecycle::Running);
+}
+
+#[test]
+fn try_block_on_during_unwind_returns_panicking() {
+	struct D(StoreCtx);
+	impl Drop for D {
+		fn drop(&mut self) {
+			// try_block_on 在 unwind 中返回 Err(Panicking)，不 abort
+			assert!(matches!(
+				self.0.try_block_on(std::future::pending::<()>()),
+				Err(SuspendError::Panicking)
+			));
+		}
+	}
+	let slot: Rc<RefCell<Option<StoreCtx>>> = Rc::new(RefCell::new(None));
+	let s = slot.clone();
+	let rt = StackRuntime::new(move |ctx| {
+		*s.borrow_mut() = Some(ctx.to_store());
+		let _d = D(slot.borrow().clone().unwrap());
+		panic!("boom");
+	})
+	.unwrap();
+	let _ = catch_unwind(AssertUnwindSafe(|| {
+		let _ = block_on(rt);
+	}));
 }

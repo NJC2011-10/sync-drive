@@ -2,7 +2,9 @@
 
 use crate::DEFAULT_STACK_SIZE;
 use crate::ctx::SuspendCtx;
-use crate::inner::{Inner, Lifecycle};
+use crate::inner::Inner;
+use crate::state::Lifecycle;
+use crate::state::RunState;
 use corosensei::Coroutine;
 use corosensei::stack::DefaultStack;
 use std::future::Future;
@@ -10,18 +12,6 @@ use std::panic::resume_unwind;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
-
-/// `StackRuntime` 的 poll 视角状态。和 `Inner::lifecycle` 是两个维度：
-/// 这里管“能否 poll”，`lifecycle` 管“能否 suspend”。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RunState {
-	/// 可 poll，`coroutine` 为 `Some`。
-	Running,
-	/// 不可 poll，`coroutine` 仍为 `Some`（栈保留，等 `into_stack` 取回或 drop 时释放）。
-	Done,
-	/// 不可 poll，`coroutine` 为 `None`（panic 后已 drop）。
-	Poisoned,
-}
 
 /// 栈所有者。实现 `Future`，由 executor 驱动。
 pub struct StackRuntime<T> {

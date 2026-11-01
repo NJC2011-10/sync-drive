@@ -1,7 +1,8 @@
 //! 普通路径的借用句柄。
 
+use crate::error::SuspendError;
 use crate::handle::SuspendCapability;
-use crate::inner::{Inner, SuspendError};
+use crate::inner::Inner;
 use crate::store::StoreCtx;
 use corosensei::Yielder;
 use std::cell::Cell;

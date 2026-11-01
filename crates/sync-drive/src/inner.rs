@@ -1,5 +1,7 @@
 //! 协程执行环境与两个方向的驱动逻辑。
 
+use crate::error::SuspendError;
+use crate::state::Lifecycle;
 use corosensei::stack::DefaultStack;
 use corosensei::{Coroutine, CoroutineResult};
 use std::any::Any;
@@ -7,40 +9,6 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::task::{Context, Poll, Waker};
-
-/// 协程的生命周期状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Lifecycle {
-	/// 初始值。`StoreCtx`/`SuspendCtx` 只能在 `body` 内拿到，此时 lifecycle
-	/// 已是 `Running`，所以这个状态永远不会出现在 `SuspendError` 中。
-	NotStarted,
-	Running,
-	Suspended,
-	Done,
-	Poisoned,
-}
-
-/// `run_until_ready` / `suspend_with` 的失败原因。
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum SuspendError {
-	/// lifecycle 不是 Running。携带实际状态便于诊断。
-	NotInResume(Lifecycle),
-	/// 处于 panic 展开中。`block_on` 路径下：有 `catch_unwind` 包裹时被捕获，
-	/// 无包裹时 double panic → abort。不是“正常错误”，是“契约违反后的终止”。
-	Panicking,
-	/// 当前 SP 不在本协程的栈范围内。
-	WrongStack,
-}
-
-impl std::fmt::Display for SuspendError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::NotInResume(l) => write!(f, "not inside resume (lifecycle: {l:?})"),
-			Self::Panicking => write!(f, "cannot suspend during panic unwinding"),
-			Self::WrongStack => write!(f, "cross-coroutine suspend attempt"),
-		}
-	}
-}
 
 /// 一条协程的执行环境。
 pub(crate) struct Inner {

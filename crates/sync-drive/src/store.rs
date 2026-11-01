@@ -1,7 +1,9 @@
 //! 逃逸路径的句柄。唯一不安全点在这里。
 
+use crate::error::SuspendError;
 use crate::handle::SuspendCapability;
-use crate::inner::{Inner, Lifecycle, SuspendError};
+use crate::inner::Inner;
+use crate::state::Lifecycle;
 use corosensei::Yielder;
 use std::cell::Cell;
 use std::ptr::NonNull;

@@ -1,4 +1,6 @@
-use crate::inner::{Inner, SuspendError};
+use crate::error::SuspendError;
+use crate::inner::Inner;
+use crate::state::Lifecycle;
 use corosensei::Yielder;
 use std::future::Future;
 
@@ -39,6 +41,25 @@ pub trait SuspendHandle {
 	/// 只有 `Pending` 时才检查上述条件。
 	fn block_on<F: Future>(&self, f: F) -> F::Output;
 
+	/// 同 [`block_on`](Self::block_on)，但返回 `Result` 而非 panic。
+	///
+	/// 在 panic 展开中调用时返回 `Err(Panicking)`，不触发 double panic。
+	///
+	/// # Errors
+	///
+	/// - [`SuspendError::NotInResume`]：协程未运行 / 已挂起 / 已结束 / 已 panic；
+	/// - [`SuspendError::WrongStack`]：当前 SP 不属于该协程（交叉 resume）；
+	/// - [`SuspendError::Panicking`]：处于 panic 展开中。
+	///
+	/// future 立即 `Ready` 时返回 `Ok`，不要求协程上下文。
+	fn try_block_on<F: Future>(&self, f: F) -> Result<F::Output, SuspendError>;
+
+	/// 当前协程的生命周期状态。只读，返回 `Copy` 拷贝。
+	///
+	/// 外部无法观察到 `Lifecycle::NotStarted`——句柄只在 `body` 内可用，
+	/// 此时已是 `Running` 或更晚。
+	fn lifecycle(&self) -> Lifecycle;
+
 	/// 在父栈上执行闭包。
 	///
 	/// # Panics / Aborts
@@ -57,6 +78,17 @@ impl<H: SuspendCapability> SuspendHandle for H {
 		self.inner()
 			.run_until_ready(f, || self.suspend_with(|y| y.suspend(())))
 			.unwrap_or_else(|e| unreachable_suspend("block_on", e))
+	}
+
+	#[inline]
+	fn try_block_on<F: Future>(&self, f: F) -> Result<F::Output, SuspendError> {
+		self.inner()
+			.run_until_ready(f, || self.suspend_with(|y| y.suspend(())))
+	}
+
+	#[inline]
+	fn lifecycle(&self) -> Lifecycle {
+		self.inner().lifecycle.get()
 	}
 
 	#[inline]
