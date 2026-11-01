@@ -1,4 +1,4 @@
-//! 栈式协程桥接内核：让调用者用同步写法驱动异步操作，线程不被阻塞。
+#![doc = include_str!("../README.md")]
 
 extern crate self as sync_drive;
 

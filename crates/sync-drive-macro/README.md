@@ -17,13 +17,12 @@ fn fetch(ctx: &::sync_drive::SuspendCtx<'_>, url: String) -> String {
 
 安装
 
+通常不需要直接依赖 sync-drive-macro——sync-drive 已经 re-export 了 blocking 宏：
+
 ```toml
 [dependencies]
 sync-drive = "0.1"
-sync-drive-macro = "0.1"
 ```
-
-sync-drive 已经 re-export 了 blocking 宏，通常不需要直接依赖 sync-drive-macro：
 
 ```rust
 use sync_drive::blocking;   // ← 从这里拿
@@ -36,17 +35,20 @@ use sync_drive::{blocking, StackRuntime, SuspendHandle};
 
 #[blocking]
 async fn fetch(url: String) -> String {
-    reqwest::get(url).await.unwrap().text().await.unwrap()
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    format!("<response from {url}>")
 }
 
 #[blocking]
-async fn safe_read(path: String) -> std::io::Result<Vec<u8>> {
-    tokio::fs::read(path).await
+async fn safe_parse(s: String) -> std::io::Result<i32> {
+    s.parse().map_err(|e| std::io::Error::other(e))
 }
 
 let rt = StackRuntime::new(|ctx| -> std::io::Result<()> {
     let html = fetch(&ctx, "https://example.com".into());
-    let bytes = safe_read(&ctx, "a.txt".into())?;   // ? 正常用
+    let n = safe_parse(&ctx, "42".into())?;   // ? 正常用
+    assert!(html.contains("example.com"));
+    assert_eq!(n, 42);
     Ok(())
 }).unwrap();
 ```
@@ -68,7 +70,12 @@ let rt = StackRuntime::new(|ctx| -> std::io::Result<()> {
 需要泛型时手写闭包：
 
 ```rust
-fn double<T: std::ops::Add<Output = T> + Copy>(ctx: &SuspendCtx<'_>, x: T) -> T {
+use sync_drive::{SuspendCtx, SuspendHandle};
+
+fn double<T>(ctx: &SuspendCtx<'_>, x: T) -> T
+where
+    T: std::ops::Add<Output = T> + Copy,
+{
     ctx.block_on(async move { x + x })
 }
 ```
