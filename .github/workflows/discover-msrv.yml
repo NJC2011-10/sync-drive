@@ -1,0 +1,34 @@
+name: Discover MSRV
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover-msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # cargo-msrv 需要 rustup 来安装和切换多个工具链
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install cargo-msrv
+        run: cargo install cargo-msrv --locked
+
+      # --bisect: 二分查找，比线性查找快得多
+      # --path: 指向 workspace 中核心 crate 的目录
+      # --output-format json: 方便后续解析（可选）
+      - name: Find MSRV
+        run: |
+          cargo msrv find \
+            --bisect \
+            --path crates/sync-drive \
+            --output-format json

@@ -1,4 +1,5 @@
 name: CI
+
 on:
   workflow_dispatch:
   push:
@@ -29,20 +30,43 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
 
       - name: Format check
         run: cargo fmt --all -- --check
 
+      # 不用 -D warnings：滚动更新下 stable 新增 lint 会让 CI 无故变红。
+      # 只阻断 correctness / suspicious，pedantic 仅提示。
       - name: Clippy check
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: >
+          cargo clippy --workspace --all-targets --all-features --locked
+          -- -D clippy::correctness -D clippy::suspicious -W clippy::pedantic
 
       - name: Run tests
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --all-targets --all-features --locked
 
-      - name: Run Doc-tests
-        run: cargo test --doc --workspace
+      - name: Run doc-tests
+        run: cargo test --doc --workspace --all-features --locked
 
       - name: Build docs
         env:
           RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --no-deps --workspace
+        run: cargo doc --no-deps --workspace --all-features --locked
+
+  clippy-nightly:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # 故意用 -D warnings：暴露未来会进 stable 的新规则，红了不阻断，只是提前知道。
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
