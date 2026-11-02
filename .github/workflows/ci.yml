@@ -58,15 +58,3 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --no-deps --workspace --all-features --locked
-
-  clippy-nightly:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      # 故意用 -D warnings：暴露未来会进 stable 的新规则，红了不阻断，只是提前知道。
-      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
