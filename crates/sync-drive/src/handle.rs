@@ -28,7 +28,7 @@ pub trait SuspendHandle {
     /// 以下情况是**调用者违反契约，不可恢复**：
     ///
     /// - 协程未启动、已结束或已 panic（`lifecycle != Running`）；
-    /// - 当前栈不属于该协程（`WrongStack`，跨协程 suspend）。
+    /// - 当前栈不属于该协程（`CrossCoroutine`）。
     ///
     /// # Aborts
     ///
@@ -41,17 +41,24 @@ pub trait SuspendHandle {
     /// 只有 `Pending` 时才检查上述条件。
     fn block_on<F: Future>(&self, f: F) -> F::Output;
 
-    /// 同 [`block_on`](Self::block_on)，但返回 `Result` 而非 panic。
-    ///
-    /// 在 panic 展开中调用时返回 `Err(Panicking)`，不触发 double panic。
+    /// 同 [`block_on`](Self::block_on)，但对调用方可控的失败返回 `Err`
+    /// 而非 panic。
     ///
     /// # Errors
     ///
+    /// 以下均为**调用方错误**，返回 `Err` 而非 panic：
+    ///
     /// - [`SuspendError::NotInResume`]：协程未运行 / 已挂起 / 已结束 / 已 panic；
-    /// - [`SuspendError::WrongStack`]：当前 SP 不属于该协程（交叉 resume）；
+    /// - [`SuspendError::CrossCoroutine`]：当前 SP 不属于该协程；
     /// - [`SuspendError::Panicking`]：处于 panic 展开中。
     ///
     /// future 立即 `Ready` 时返回 `Ok`，不要求协程上下文。
+    ///
+    /// # Panics
+    ///
+    /// **内部不变量破坏**（库的 bug，非调用方错误）可能 panic，例如
+    /// `trap_check` 未初始化。这类 panic 意味着库的构造逻辑被绕过，应报 issue。
+    /// `Err` 不覆盖此类失败。
     fn try_block_on<F: Future>(&self, f: F) -> Result<F::Output, SuspendError>;
 
     /// 当前协程的生命周期状态。只读，返回 `Copy` 拷贝。
@@ -61,6 +68,10 @@ pub trait SuspendHandle {
     fn lifecycle(&self) -> Lifecycle;
 
     /// 在父栈上执行闭包。
+    ///
+    /// 闭包执行期间 `lifecycle` 仍为 `Running`，但 SP 位于父栈。若经
+    /// `unsafe` 绕过 `!Send` 在闭包内调用 `try_block_on`，会返回
+    /// [`SuspendError::CrossCoroutine`](crate::SuspendError::CrossCoroutine)。
     ///
     /// # Panics / Aborts
     ///

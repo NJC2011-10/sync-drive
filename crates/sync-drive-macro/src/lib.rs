@@ -1,7 +1,24 @@
+#![doc = include_str!("../README.md")]
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{ItemFn, parse_macro_input};
 
+/// 属性宏：把 `async fn` 展开为同步函数 `fn(ctx: &SuspendCtx<'_>, ...)`。
+///
+/// # 依赖名约束
+///
+/// 宏展开引用 `::sync_drive::SuspendHandle`，因此**调用方 crate 必须以
+/// `sync-drive` 名称依赖本库**。
+///
+/// 重命名依赖（如
+/// `my-drive = { package = "sync-drive", version = "0.1" }`）会导致宏展开
+/// 找不到 `::sync_drive`，编译报 `E0433: use of undeclared crate or
+/// module 'sync_drive'`。错误会指向 `#[blocking]` 标注处，但根因在
+/// `Cargo.toml`。
+///
+/// 当前版本不支持重命名自动解析。若需要重命名，请改用
+/// `sync_drive::SuspendHandle::block_on` 手写，或暂不重命名依赖。
 #[proc_macro_attribute]
 pub fn blocking(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemFn);

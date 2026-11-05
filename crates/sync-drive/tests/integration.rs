@@ -347,7 +347,7 @@ fn concurrent_tasks_overlap_in_time() {
 
     let make = || {
         StackRuntime::new(|ctx| {
-            ctx.block_on(tokio::time::sleep(Duration::from_millis(100)));
+            ctx.block_on(tokio::time::sleep(Duration::from_millis(200)));
         })
         .unwrap()
     };
@@ -360,12 +360,12 @@ fn concurrent_tasks_overlap_in_time() {
     let elapsed = start.elapsed();
 
     assert!(
-        elapsed < Duration::from_millis(150),
-        "两个 100ms sleep 应并发执行，实际耗时 {elapsed:?}"
+        elapsed < Duration::from_millis(300),
+        "两个 200ms sleep 应并发执行，实际耗时 {elapsed:?}"
     );
     assert!(
-        elapsed >= Duration::from_millis(100),
-        "至少要等一个 100ms sleep，实际 {elapsed:?}"
+        elapsed >= Duration::from_millis(200),
+        "至少要等一个 200ms sleep，实际 {elapsed:?}"
     );
 }
 
@@ -378,7 +378,7 @@ fn serial_tasks_take_full_time() {
 
     let make = || {
         StackRuntime::new(|ctx| {
-            ctx.block_on(tokio::time::sleep(Duration::from_millis(100)));
+            ctx.block_on(tokio::time::sleep(Duration::from_millis(200)));
         })
         .unwrap()
     };
@@ -394,8 +394,8 @@ fn serial_tasks_take_full_time() {
     let elapsed = start.elapsed();
 
     assert!(
-        elapsed >= Duration::from_millis(180),
-        "两个 100ms sleep 串行应 ~200ms，实际 {elapsed:?}"
+        elapsed >= Duration::from_millis(380),
+        "两个 200ms sleep 串行应 ~400ms，实际 {elapsed:?}"
     );
 }
 
@@ -525,4 +525,66 @@ fn try_block_on_during_unwind_returns_panicking() {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         let _ = block_on(rt);
     }));
+}
+
+#[test]
+fn on_parent_stack_executes() {
+    let rt = StackRuntime::new(|ctx| {
+        let v = ctx.on_parent_stack(|| 42u32);
+        v + 1
+    })
+    .unwrap();
+    assert_eq!(block_on(rt), 43);
+}
+
+/// 仅用于测试：`StoreCtx` 是 `!Send`，用 unsafe 包装骗过
+/// `on_parent_stack` 的 `F: Send` 约束，以验证 SP 检查是最后一道防线。
+struct SendStore(StoreCtx);
+// SAFETY: 仅用于测试，构造 on_parent_stack 内的跨栈 suspend 场景。
+unsafe impl Send for SendStore {}
+
+#[test]
+fn cross_coroutine_via_on_parent_stack() {
+    let rt = StackRuntime::new(|ctx| {
+        let store = SendStore(ctx.to_store());
+        ctx.on_parent_stack(move || {
+            let store = store;
+            // lifecycle 仍为 Running，但当前 SP 在父栈上
+            match store.0.try_block_on(std::future::pending::<()>()) {
+                Err(SuspendError::CrossCoroutine) => {}
+                other => panic!("expected CrossCoroutine, got {other:?}"),
+            }
+        });
+    })
+    .unwrap();
+    block_on(rt);
+}
+
+#[test]
+fn into_stack_after_completion_returns_stack() {
+    let mut rt = StackRuntime::new(|_| 7u32).unwrap();
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    assert!(matches!(Pin::new(&mut rt).poll(&mut cx), Poll::Ready(7)));
+
+    let stack = rt.into_stack().expect("Done should return stack");
+    let rt2 = StackRuntime::with_stack(|_| 8u32, stack);
+    assert_eq!(block_on(rt2), 8);
+}
+
+#[test]
+#[should_panic(expected = "cannot extract stack from an incomplete coroutine")]
+fn into_stack_while_suspended_panics() {
+    let rt = StackRuntime::new(|ctx| {
+        ctx.block_on(std::future::pending::<()>());
+    })
+    .unwrap();
+
+    let mut rt = Box::pin(rt);
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    assert!(rt.as_mut().poll(&mut cx).is_pending());
+
+    let rt = *Pin::into_inner(rt);
+    let _ = rt.into_stack(); // 预期 panic，测试到此结束
 }

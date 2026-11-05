@@ -1,19 +1,19 @@
 **把 `async fn` 包装成协程内可调用的同步函数。**
 
-```rust
+```rust,ignore
 #[blocking]
 async fn fetch(url: String) -> String { ... }
 ```
 
 展开为：
 
-```rust
+```rust,ignore
 fn fetch(ctx: &::sync_drive::SuspendCtx<'_>, url: String) -> String {
     ::sync_drive::SuspendHandle::block_on(ctx, async move { ... })
 }
 ```
 
-调用者写 fetch(&ctx, url)，得到同步返回值——内部走 block_on，Pending 时挂起整条栈。
+调用者写 fetch(&ctx, url)，得到同步返回值——内部走 `block_on`，`Pending` 时挂起整条栈。
 
 安装
 
@@ -24,13 +24,13 @@ fn fetch(ctx: &::sync_drive::SuspendCtx<'_>, url: String) -> String {
 sync-drive = "0.1"
 ```
 
-```rust
+```rust,ignore
 use sync_drive::blocking;   // ← 从这里拿
 ```
 
 用法
 
-```rust
+```rust,ignore
 use sync_drive::{blocking, StackRuntime, SuspendHandle};
 
 #[blocking]
@@ -55,9 +55,9 @@ let rt = StackRuntime::new(|ctx| -> std::io::Result<()> {
 
 展开规则
 
-· 第一个参数自动插入 ctx: &SuspendCtx<'_>；
+· 第一个参数自动插入 `ctx: &SuspendCtx<'_>`；
 · 返回类型不变；
-· 函数体包进 SuspendHandle::block_on(ctx, async move { ... })；
+· 函数体包进 `SuspendHandle::block_on(ctx, async move { ... })`；
 · 原始属性（#[allow] 等）保留；
 · self 方法：ctx 插在 self 之后。
 
@@ -66,10 +66,12 @@ let rt = StackRuntime::new(|ctx| -> std::io::Result<()> {
 · 泛型 / 生命周期参数 / where 子句
 · impl Trait 参数 / 返回值
 · mut 参数模式
+· 宏依赖名：`#[blocking]` 展开引用 `::sync_drive`，调用方必须以 `sync-drive`
+  名称依赖，重命名依赖会导致宏展开编译失败（E0433）。暂不支持自动解析。
 
 需要泛型时手写闭包：
 
-```rust
+```rust,ignore
 use sync_drive::{SuspendCtx, SuspendHandle};
 
 fn double<T>(ctx: &SuspendCtx<'_>, x: T) -> T

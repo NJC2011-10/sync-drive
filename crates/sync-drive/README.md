@@ -67,7 +67,7 @@ Panics / Aborts
 
 [`SuspendHandle::block_on`] 和 [`SuspendHandle::on_parent_stack`]：
 
-· # Panics：协程未启动 / 已结束 / 已 panic（lifecycle != Running）、当前栈不属于该协程（WrongStack）。不可恢复。
+· # Panics：协程未启动 / 已结束 / 已 panic（lifecycle != Running）、当前栈不属于该协程（CrossCoroutine）。不可恢复。
 · # Aborts：从 Drop 实现里调用（panic 展开中），unwind 中不能切栈，可能导致进程 abort。不要在任何 Drop 实现里调用这些方法；如需在 Drop 中安全驱动，用 [`SuspendHandle::try_block_on`]。
 
 future 立即 Ready 时不要求协程上下文，可在协程外调用。

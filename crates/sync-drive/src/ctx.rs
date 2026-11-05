@@ -5,7 +5,6 @@ use crate::handle::SuspendCapability;
 use crate::inner::Inner;
 use crate::store::StoreCtx;
 use corosensei::Yielder;
-use std::cell::Cell;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
@@ -33,7 +32,7 @@ impl SuspendCtx<'_> {
     #[must_use]
     pub fn to_store(&self) -> StoreCtx {
         StoreCtx {
-            yielder: Cell::new(Some(NonNull::from(self.yielder))),
+            yielder: NonNull::from(self.yielder),
             inner: self.inner.clone(),
         }
     }

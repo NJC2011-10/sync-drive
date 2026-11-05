@@ -94,17 +94,26 @@ impl<T: 'static> StackRuntime<T> {
     ///
     /// # 返回
     ///
-    /// - `Some(stack)`：`RunState` 为 `Running`（挂起中）或 `Done`（已完成），
-    ///   `coroutine` 字段为 `Some`，`Coroutine::into_stack` 消费它取回栈。
+    /// - `Some(stack)`：`RunState` 为 `Done`（已完成）——`coroutine` 字段为
+    ///   `Some`，`Coroutine::done()` 为 `true`，`into_stack` 正常返回栈。
     /// - `None`：`RunState` 为 `Poisoned`（panic 后），`coroutine` 字段已在
     ///   `poll` 的 `Err` 分支被 `take()`，栈随 `Coroutine::drop` 展开释放，
     ///   无法回收。
     ///
-    /// # 挂起中取栈
+    /// # Panics
     ///
-    /// 若协程尚未完成，`Coroutine::into_stack` 会强制结束协程（展开栈），
-    /// 栈上的局部变量按正常路径 drop。这意味着**未完成的协程逻辑被放弃**，
-    /// 调用前需确认这是预期行为。
+    /// 若协程尚未完成（`RunState::Running`，含挂起中），
+    /// `Coroutine::into_stack` 会 panic：
+    ///
+    /// ```text
+    /// cannot extract stack from an incomplete coroutine
+    /// ```
+    ///
+    /// 这是 `corosensei 0.3.4` 的防护——未完成的协程栈上仍有存活帧，
+    /// 提取会导致悬垂。调用前需先 `poll` 到 `Ready` 让协程完成，
+    /// 或 `drop` 本对象让栈随 `Coroutine::drop` 展开。
+    ///
+    /// 当前不支持挂起中安全取栈。
     ///
     /// # 消费 `self`
     ///
