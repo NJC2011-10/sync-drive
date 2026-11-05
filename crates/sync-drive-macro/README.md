@@ -58,7 +58,7 @@ let rt = StackRuntime::new(|ctx| -> std::io::Result<()> {
 · 第一个参数自动插入 `ctx: &SuspendCtx<'_>`；
 · 返回类型不变；
 · 函数体包进 `SuspendHandle::block_on(ctx, async move { ... })`；
-· 原始属性（#[allow] 等）保留；
+· 原始属性（`#[allow]` 等）保留；
 · self 方法：ctx 插在 self 之后。
 
 不支持
