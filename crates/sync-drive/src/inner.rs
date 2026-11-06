@@ -18,7 +18,6 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
-    #[inline]
     pub(crate) fn new() -> Self {
         Self {
             waker: RefCell::new(None),
@@ -95,6 +94,7 @@ impl Inner {
     ///
     /// # Panics
     /// 若 `trap_check` 未初始化（构造逻辑错误，不应发生）。
+    #[inline]
     pub(crate) fn stack_ptr_in_bounds(&self, sp: usize) -> bool {
         self.trap_check
             .get()
@@ -102,6 +102,7 @@ impl Inner {
     }
 
     /// 当前执行栈是否在本协程栈范围内。
+    #[inline]
     pub(crate) fn current_stack_in_bounds(&self) -> bool {
         self.stack_ptr_in_bounds(psm::stack_pointer() as usize)
     }

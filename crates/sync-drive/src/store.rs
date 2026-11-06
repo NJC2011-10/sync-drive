@@ -21,6 +21,7 @@ impl SuspendCapability for StoreCtx {
         &self.inner
     }
 
+    #[inline]
     fn with_yielder<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError> {
         match self.inner.lifecycle.get() {
             InternalLifecycle::Suspendable => {}
