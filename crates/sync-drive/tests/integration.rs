@@ -609,3 +609,17 @@ fn cross_coroutine_via_nested_runtime() {
     .unwrap();
     block_on(rt);
 }
+
+#[test]
+fn is_on_coroutine_stack_reflects_sp() {
+    let rt = StackRuntime::new(|ctx| {
+        assert!(ctx.is_on_coroutine_stack(), "协程栈上应为 true");
+        let store = SendStore(ctx.to_store());
+        ctx.on_parent_stack(move || {
+            let store = store;
+            assert!(!store.0.is_on_coroutine_stack(), "父栈上应为 false");
+        });
+    })
+    .unwrap();
+    block_on(rt);
+}

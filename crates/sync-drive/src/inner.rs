@@ -90,4 +90,19 @@ impl Inner {
             }
         }
     }
+
+    /// 指定 SP 是否在本协程栈范围内（含 guard page）。
+    ///
+    /// # Panics
+    /// 若 `trap_check` 未初始化（构造逻辑错误，不应发生）。
+    pub(crate) fn stack_ptr_in_bounds(&self, sp: usize) -> bool {
+        self.trap_check
+            .get()
+            .expect("trap_check set exactly once at construction")(sp)
+    }
+
+    /// 当前执行栈是否在本协程栈范围内。
+    pub(crate) fn current_stack_in_bounds(&self) -> bool {
+        self.stack_ptr_in_bounds(psm::stack_pointer() as usize)
+    }
 }

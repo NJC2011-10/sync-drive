@@ -76,6 +76,11 @@ pub trait SuspendHandle {
     where
         F: FnOnce() -> R + Send,
         R: Send;
+
+    /// 当前执行栈是否属于本协程。
+    ///
+    /// 在 `on_parent_stack` 闭包内、或通过 `unsafe` 跨栈调用时返回 `false`。
+    fn is_on_coroutine_stack(&self) -> bool;
 }
 
 /// 为所有可挂起句柄实现 `SuspendHandle`。
@@ -106,6 +111,11 @@ impl<H: SuspendCapability> SuspendHandle for H {
     {
         self.suspend_with(|y| y.on_parent_stack(f))
             .unwrap_or_else(|e| unreachable_suspend("on_parent_stack", e))
+    }
+
+    #[inline]
+    fn is_on_coroutine_stack(&self) -> bool {
+        self.inner().current_stack_in_bounds()
     }
 }
 
