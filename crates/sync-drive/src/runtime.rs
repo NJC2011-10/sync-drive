@@ -3,7 +3,7 @@
 use crate::DEFAULT_STACK_SIZE;
 use crate::ctx::SuspendCtx;
 use crate::inner::Inner;
-use crate::state::Lifecycle;
+use crate::state::InternalLifecycle;
 use crate::state::RunState;
 use corosensei::Coroutine;
 use corosensei::stack::DefaultStack;
@@ -25,10 +25,7 @@ pub struct StackRuntime<T> {
 impl<T: 'static> StackRuntime<T> {
     /// 用默认栈大小创建。
     ///
-    /// `body` 接收协程内部的 [`SuspendCtx`]。
-    ///
     /// # Errors
-    /// 栈分配失败时返回 [`std::io::Error`]。
     #[inline]
     pub fn new<F>(body: F) -> Result<Self, std::io::Error>
     where
@@ -37,11 +34,9 @@ impl<T: 'static> StackRuntime<T> {
         Self::with_stack_size(body, DEFAULT_STACK_SIZE)
     }
 
-    /// 指定栈大小创建。内部调 [`DefaultStack::new`] 分配栈，然后委托给
-    /// [`with_stack`](Self::with_stack)。
+    /// 指定栈大小创建。
     ///
     /// # Errors
-    /// 栈分配失败时返回 [`std::io::Error`]。
     #[inline]
     pub fn with_stack_size<F>(body: F, stack_size: usize) -> Result<Self, std::io::Error>
     where
@@ -53,11 +48,8 @@ impl<T: 'static> StackRuntime<T> {
 
     /// 用已有的栈创建。`stack` 通常来自 [`into_stack`](Self::into_stack) 的返回值。
     ///
-    /// 不返回 `Result`——栈已存在，不存在分配失败。栈的分配错误由调用方
-    /// 在 [`DefaultStack::new`] 时处理。
-    ///
     /// # Panics
-    /// 若 `trap_check` 设置失败（构造逻辑错误，不应发生）。
+    /// 若内部构造逻辑被破坏（不应发生）。
     pub fn with_stack<F>(body: F, stack: DefaultStack) -> Self
     where
         F: FnOnce(SuspendCtx<'_>) -> T + 'static,
@@ -90,38 +82,27 @@ impl<T: 'static> StackRuntime<T> {
     /// 消费 `self`，取回协程使用的栈。
     ///
     /// 取回的 [`DefaultStack`] 可以传给 [`with_stack`](Self::with_stack)
-    /// 复用，避免重新 `mmap` 分配。
+    /// 复用，避免重新分配。
     ///
     /// # 返回
     ///
-    /// - `Some(stack)`：`RunState` 为 `Done`（已完成）——`coroutine` 字段为
-    ///   `Some`，`Coroutine::done()` 为 `true`，`into_stack` 正常返回栈。
-    /// - `None`：`RunState` 为 `Poisoned`（panic 后），`coroutine` 字段已在
-    ///   `poll` 的 `Err` 分支被 `take()`，栈随 `Coroutine::drop` 展开释放，
-    ///   无法回收。
+    /// - `Some(stack)`：协程已正常完成，栈可复用。
+    /// - `None`：协程因 panic 终止，栈已随协程释放，无法回收。
     ///
     /// # Panics
     ///
-    /// 若协程尚未完成（`RunState::Running`，含挂起中），
-    /// `Coroutine::into_stack` 会 panic：
+    /// 若协程尚未完成（运行中或挂起中），`corosensei` 不允许提取栈，会 panic：
     ///
     /// ```text
     /// cannot extract stack from an incomplete coroutine
     /// ```
     ///
-    /// 这是 `corosensei 0.3.4` 的防护——未完成的协程栈上仍有存活帧，
-    /// 提取会导致悬垂。调用前需先 `poll` 到 `Ready` 让协程完成，
-    /// 或 `drop` 本对象让栈随 `Coroutine::drop` 展开。
-    ///
-    /// 当前不支持挂起中安全取栈。
+    /// 调用前需先 `poll` 到 `Ready`，或 `drop` 本对象让栈随协程展开释放。
     ///
     /// # 消费 `self`
     ///
-    /// 调用后 `StackRuntime` 不可再用，`Drop` 会在 `into_stack` 返回前执行：
-    /// `lifecycle` 若仍为 `Running` / `Suspended`，被写为 `Done`；
-    /// 逃逸的 [`StoreCtx`](crate::StoreCtx) 此后再调 `block_on` 会得到
-    /// `NotInResume(Done)`。
-    #[inline]
+    /// 调用后 `StackRuntime` 不可再用。逃逸的 [`StoreCtx`](crate::StoreCtx)
+    /// 此后再调 `block_on` 会得到 `NotInResume(Done)`。
     #[must_use]
     pub fn into_stack(mut self) -> Option<DefaultStack> {
         self.coroutine.take().map(Coroutine::into_stack)
@@ -166,10 +147,12 @@ impl<T> Drop for StackRuntime<T> {
         // coroutine 由 Option 自动 drop，这里只更新 lifecycle：
         // 标记 Done 让逃逸的 StoreCtx 事后调用 block_on 得到 NotInResume(Done) 而非 UB。
         match self.inner.lifecycle.get() {
-            Lifecycle::NotStarted | Lifecycle::Running | Lifecycle::Suspended => {
-                self.inner.lifecycle.set(Lifecycle::Done);
+            InternalLifecycle::NotStarted
+            | InternalLifecycle::Suspendable
+            | InternalLifecycle::Waiting => {
+                self.inner.lifecycle.set(InternalLifecycle::Done);
             }
-            Lifecycle::Done | Lifecycle::Poisoned => {}
+            InternalLifecycle::Done | InternalLifecycle::Poisoned => {}
         }
     }
 }

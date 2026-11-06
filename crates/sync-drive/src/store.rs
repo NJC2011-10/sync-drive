@@ -3,7 +3,7 @@
 use crate::error::SuspendError;
 use crate::handle::SuspendCapability;
 use crate::inner::Inner;
-use crate::state::Lifecycle;
+use crate::state::InternalLifecycle;
 use corosensei::Yielder;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -23,8 +23,8 @@ impl SuspendCapability for StoreCtx {
 
     fn with_yielder<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError> {
         match self.inner.lifecycle.get() {
-            Lifecycle::Running => {}
-            other => return Err(SuspendError::NotInResume(other)),
+            InternalLifecycle::Suspendable => {}
+            other => return Err(SuspendError::NotInResume(other.to_public())),
         }
         let sp = psm::stack_pointer() as usize;
         match self.inner.trap_check.get() {

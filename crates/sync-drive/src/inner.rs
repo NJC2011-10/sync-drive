@@ -1,7 +1,7 @@
 //! 协程执行环境与两个方向的驱动逻辑。
 
 use crate::error::SuspendError;
-use crate::state::Lifecycle;
+use crate::state::InternalLifecycle;
 use corosensei::stack::DefaultStack;
 use corosensei::{Coroutine, CoroutineResult};
 use std::any::Any;
@@ -13,7 +13,7 @@ use std::task::{Context, Poll, Waker};
 /// 一条协程的执行环境。
 pub(crate) struct Inner {
     pub(crate) waker: RefCell<Option<Waker>>,
-    pub(crate) lifecycle: Cell<Lifecycle>,
+    pub(crate) lifecycle: Cell<InternalLifecycle>,
     pub(crate) trap_check: OnceCell<Box<dyn Fn(usize) -> bool>>,
 }
 
@@ -22,7 +22,7 @@ impl Inner {
     pub(crate) fn new() -> Self {
         Self {
             waker: RefCell::new(None),
-            lifecycle: Cell::new(Lifecycle::NotStarted),
+            lifecycle: Cell::new(InternalLifecycle::NotStarted),
             trap_check: OnceCell::new(),
         }
     }
@@ -44,7 +44,7 @@ impl Inner {
 
     /// 异步转同步：poll future 直到 `Ready`，`Pending` 时调用 `suspend`。
     ///
-    /// `panicking` 检查由 [`SuspendHandle::suspend_with`] 统一负责，不在此处。
+    /// `panicking` 检查由调用方的 `suspend` 闭包负责，不在此处。
     pub(crate) fn run_until_ready<F, S>(
         &self,
         f: F,
@@ -74,18 +74,18 @@ impl Inner {
         &self,
         co: &mut Coroutine<(), (), T, DefaultStack>,
     ) -> Result<Poll<T>, Box<dyn Any + Send>> {
-        self.lifecycle.set(Lifecycle::Running);
+        self.lifecycle.set(InternalLifecycle::Suspendable);
         match catch_unwind(AssertUnwindSafe(|| co.resume(()))) {
             Ok(CoroutineResult::Yield(())) => {
-                self.lifecycle.set(Lifecycle::Suspended);
+                self.lifecycle.set(InternalLifecycle::Waiting);
                 Ok(Poll::Pending)
             }
             Ok(CoroutineResult::Return(t)) => {
-                self.lifecycle.set(Lifecycle::Done);
+                self.lifecycle.set(InternalLifecycle::Done);
                 Ok(Poll::Ready(t))
             }
             Err(e) => {
-                self.lifecycle.set(Lifecycle::Poisoned);
+                self.lifecycle.set(InternalLifecycle::Poisoned);
                 Err(e)
             }
         }

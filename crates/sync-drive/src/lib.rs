@@ -19,5 +19,5 @@ pub use state::{Lifecycle, RunState};
 pub use store::StoreCtx;
 pub use sync_drive_macro::blocking;
 
-/// 默认协程栈大小。
+/// 默认协程栈大小：2 MiB。
 pub const DEFAULT_STACK_SIZE: usize = 2 * 1024 * 1024;

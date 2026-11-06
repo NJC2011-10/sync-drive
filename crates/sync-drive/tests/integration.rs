@@ -492,14 +492,14 @@ fn try_block_on_returns_err_instead_of_panic() {
 
 #[test]
 fn lifecycle_reflects_state() {
-    let captured = Rc::new(Cell::new(Lifecycle::NotStarted));
+    let captured: Rc<Cell<Option<Lifecycle>>> = Rc::new(Cell::new(None));
     let c = captured.clone();
     let rt = StackRuntime::new(move |ctx| {
-        c.set(ctx.lifecycle());
+        c.set(Some(ctx.lifecycle()));
     })
     .unwrap();
     block_on(rt);
-    assert_eq!(captured.get(), Lifecycle::Running);
+    assert_eq!(captured.get(), Some(Lifecycle::Suspendable));
 }
 
 #[test]
@@ -587,4 +587,25 @@ fn into_stack_while_suspended_panics() {
 
     let rt = *Pin::into_inner(rt);
     let _ = rt.into_stack(); // 预期 panic，测试到此结束
+}
+
+/// 嵌套 `StackRuntime`：外层 `StoreCtx` 在内层栈上调用 `try_block_on`。
+///
+/// 全程安全代码（无 `unsafe impl Send`）。lifecycle 仍是 `Suspendable`
+/// （外层仍在 resume 内），但 SP 位于内层栈，SP 检查返回 `CrossCoroutine`。
+#[test]
+fn cross_coroutine_via_nested_runtime() {
+    let rt = StackRuntime::new(|outer_ctx| {
+        let store = outer_ctx.to_store();
+        let inner = StackRuntime::new(move |_inner_ctx| {
+            match store.try_block_on(std::future::pending::<()>()) {
+                Err(SuspendError::CrossCoroutine) => {}
+                other => panic!("expected CrossCoroutine, got {other:?}"),
+            }
+        })
+        .unwrap();
+        outer_ctx.block_on(inner);
+    })
+    .unwrap();
+    block_on(rt);
 }

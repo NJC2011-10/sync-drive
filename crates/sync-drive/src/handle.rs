@@ -19,7 +19,7 @@ pub(crate) trait SuspendCapability {
     }
 }
 
-/// 公开 trait：用户看到的只有这两个方法。
+/// 挂起能力：在协程内同步驱动 Future、在父栈执行闭包、查询生命周期状态。
 pub trait SuspendHandle {
     /// 在协程内同步驱动 Future。`Pending` 时挂起整条栈，`Ready` 时返回。
     ///
@@ -27,7 +27,7 @@ pub trait SuspendHandle {
     ///
     /// 以下情况是**调用者违反契约，不可恢复**：
     ///
-    /// - 协程未启动、已结束或已 panic（`lifecycle != Running`）；
+    /// - 协程未启动、已结束或已 panic；
     /// - 当前栈不属于该协程（`CrossCoroutine`）。
     ///
     /// # Aborts
@@ -49,27 +49,23 @@ pub trait SuspendHandle {
     /// 以下均为**调用方错误**，返回 `Err` 而非 panic：
     ///
     /// - [`SuspendError::NotInResume`]：协程未运行 / 已挂起 / 已结束 / 已 panic；
-    /// - [`SuspendError::CrossCoroutine`]：当前 SP 不属于该协程；
+    /// - [`SuspendError::CrossCoroutine`]：当前执行栈不属于该协程；
     /// - [`SuspendError::Panicking`]：处于 panic 展开中。
     ///
     /// future 立即 `Ready` 时返回 `Ok`，不要求协程上下文。
     ///
     /// # Panics
     ///
-    /// **内部不变量破坏**（库的 bug，非调用方错误）可能 panic，例如
-    /// `trap_check` 未初始化。这类 panic 意味着库的构造逻辑被绕过，应报 issue。
-    /// `Err` 不覆盖此类失败。
+    /// **内部不变量破坏**（库的 bug，非调用方错误）可能 panic。这类 panic
+    /// 意味着库的构造逻辑被绕过，应报 issue。`Err` 不覆盖此类失败。
     fn try_block_on<F: Future>(&self, f: F) -> Result<F::Output, SuspendError>;
 
-    /// 当前协程的生命周期状态。只读，返回 `Copy` 拷贝。
-    ///
-    /// 外部无法观察到 `Lifecycle::NotStarted`——句柄只在 `body` 内可用，
-    /// 此时已是 `Running` 或更晚。
+    /// 当前协程的生命周期状态。
     fn lifecycle(&self) -> Lifecycle;
 
     /// 在父栈上执行闭包。
     ///
-    /// 闭包执行期间 `lifecycle` 仍为 `Running`，但 SP 位于父栈。若经
+    /// 闭包执行期间协程仍处于可挂起状态，但执行栈位于父栈。若经
     /// `unsafe` 绕过 `!Send` 在闭包内调用 `try_block_on`，会返回
     /// [`SuspendError::CrossCoroutine`](crate::SuspendError::CrossCoroutine)。
     ///
@@ -82,7 +78,7 @@ pub trait SuspendHandle {
         R: Send;
 }
 
-/// 任何 `SuspendCapability` 自动获得 `SuspendHandle`。
+/// 为所有可挂起句柄实现 `SuspendHandle`。
 impl<H: SuspendCapability> SuspendHandle for H {
     #[inline]
     fn block_on<F: Future>(&self, f: F) -> F::Output {
@@ -99,7 +95,7 @@ impl<H: SuspendCapability> SuspendHandle for H {
 
     #[inline]
     fn lifecycle(&self) -> Lifecycle {
-        self.inner().lifecycle.get()
+        self.inner().lifecycle.get().to_public()
     }
 
     #[inline]
@@ -113,7 +109,7 @@ impl<H: SuspendCapability> SuspendHandle for H {
     }
 }
 
-/// 调用者违反挂起契约时的终止。`#[cold]` 把它挪出 `block_on` 的热路径。
+/// 调用者违反挂起契约时的终止。
 ///
 /// `SuspendError::Panicking` 意味着当前在 unwind 中：若 `block_on` 被
 /// `catch_unwind` 包裹，panic 被捕获；否则 double panic 后由 Rust 运行时 abort。
