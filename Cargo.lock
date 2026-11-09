@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "sync-drive"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "corosensei",
  "futures",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "sync-drive-macro"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",

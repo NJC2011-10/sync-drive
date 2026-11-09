@@ -6,10 +6,10 @@
 
 ```toml
 [dependencies]
-sync-drive = "0.1"
+sync-drive = "0.2"
 
 # 如需 #[blocking] 属性宏：
-# sync-drive = { version = "0.1", features = ["macros"] }
+# sync-drive = { version = "0.2", features = ["macros"] }
 ```
 
 快速开始
