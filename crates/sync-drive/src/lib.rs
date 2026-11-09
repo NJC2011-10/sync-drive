@@ -17,6 +17,8 @@ pub use handle::SuspendHandle;
 pub use runtime::StackRuntime;
 pub use state::Lifecycle;
 pub use store::StoreCtx;
+
+#[cfg(feature = "macros")]
 pub use sync_drive_macro::blocking;
 
 /// 默认协程栈大小：2 MiB。

@@ -7,6 +7,9 @@
 ```toml
 [dependencies]
 sync-drive = "0.1"
+
+# 如需 #[blocking] 属性宏：
+# sync-drive = { version = "0.1", features = ["macros"] }
 ```
 
 快速开始
@@ -53,12 +56,15 @@ local.block_on(
 与 #[blocking] 宏配合
 
 ```rust
+# #[cfg(feature = "macros")]
+# {
 use sync_drive::{blocking, StackRuntime, SuspendHandle};
 
 #[blocking]
 async fn double(x: i32) -> i32 { x * 2 }
 
 let rt = StackRuntime::new(|ctx| double(&ctx, 21)).unwrap();
+# }
 ```
 
 详见 sync-drive-macro。

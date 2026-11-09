@@ -1,3 +1,5 @@
+#![cfg(feature = "macros")]
+
 use futures::executor::block_on;
 use sync_drive::{StackRuntime, blocking};
 

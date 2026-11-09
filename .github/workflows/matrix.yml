@@ -31,4 +31,4 @@ jobs:
         run: cargo test --workspace --all-features
 
       - name: cargo test --doc
-        run: cargo test --doc --workspace
+        run: cargo test --doc --workspace --all-features
