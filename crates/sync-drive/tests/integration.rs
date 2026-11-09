@@ -131,7 +131,7 @@ fn poll_after_panic() {
         let _ = rt.as_mut().poll(&mut cx);
     }));
     let msg2 = extract_panic_msg(r2.expect_err("second poll should panic").as_ref());
-    assert!(msg2.contains("polled after panic"));
+    assert!(msg2.contains("polled after completion"));
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn three_tasks_one_panics_others_unaffected() {
     }));
     assert!(
         extract_panic_msg(r2.expect_err("b second poll should panic").as_ref())
-            .contains("polled after panic")
+            .contains("polled after completion")
     );
 }
 
@@ -567,7 +567,7 @@ fn into_stack_after_completion_returns_stack() {
     let mut cx = Context::from_waker(&waker);
     assert!(matches!(Pin::new(&mut rt).poll(&mut cx), Poll::Ready(7)));
 
-    let stack = rt.into_stack().expect("Done should return stack");
+    let stack = rt.into_stack();
     let rt2 = StackRuntime::with_stack(|_| 8u32, stack);
     assert_eq!(block_on(rt2), 8);
 }
@@ -622,4 +622,22 @@ fn is_on_coroutine_stack_reflects_sp() {
     })
     .unwrap();
     block_on(rt);
+}
+
+#[test]
+fn into_stack_after_panic_returns_stack() {
+    let rt = StackRuntime::new(|_| -> u32 { panic!("boom") }).unwrap();
+    let mut rt = Box::pin(rt);
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        let _ = rt.as_mut().poll(&mut cx);
+    }));
+    assert!(r.is_err(), "首次 poll 应 panic");
+
+    let rt = *Pin::into_inner(rt);
+    let stack = rt.into_stack();
+    let rt2 = StackRuntime::with_stack(|_| 8u32, stack);
+    assert_eq!(block_on(rt2), 8);
 }

@@ -4,10 +4,9 @@ use crate::error::SuspendError;
 use crate::state::InternalLifecycle;
 use corosensei::stack::DefaultStack;
 use corosensei::{Coroutine, CoroutineResult};
-use std::any::Any;
 use std::cell::{Cell, OnceCell, RefCell};
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::task::{Context, Poll, Waker};
 
 /// 一条协程的执行环境。
@@ -64,28 +63,26 @@ impl Inner {
         }
     }
 
-    /// 同步转异步：resume 协程一次，显式写 `lifecycle`，panic 原样返回。
+    /// 同步转异步：resume 协程一次，显式写 `lifecycle`。
     ///
     /// # Panics
-    /// 若协程已处于 `Done` / `Poisoned` 状态（绕过 `poll` 直接调用），
-    /// `Coroutine::resume` 会 panic。正常调用路径（`poll`）已在顶部检查状态。
-    pub(crate) fn resume_once<T>(
-        &self,
-        co: &mut Coroutine<(), (), T, DefaultStack>,
-    ) -> Result<Poll<T>, Box<dyn Any + Send>> {
+    ///
+    /// 协程内 panic 会在写入 `Poisoned` 后原样传播。若协程已结束（绕过
+    /// `poll` 的 `done()` 检查直接调用），`Coroutine::resume` 会 panic。
+    pub(crate) fn resume_once<T>(&self, co: &mut Coroutine<(), (), T, DefaultStack>) -> Poll<T> {
         self.lifecycle.set(InternalLifecycle::Suspendable);
         match catch_unwind(AssertUnwindSafe(|| co.resume(()))) {
             Ok(CoroutineResult::Yield(())) => {
                 self.lifecycle.set(InternalLifecycle::Waiting);
-                Ok(Poll::Pending)
+                Poll::Pending
             }
             Ok(CoroutineResult::Return(t)) => {
                 self.lifecycle.set(InternalLifecycle::Done);
-                Ok(Poll::Ready(t))
+                Poll::Ready(t)
             }
             Err(e) => {
                 self.lifecycle.set(InternalLifecycle::Poisoned);
-                Err(e)
+                resume_unwind(e)
             }
         }
     }

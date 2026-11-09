@@ -15,7 +15,7 @@ pub use ctx::SuspendCtx;
 pub use error::SuspendError;
 pub use handle::SuspendHandle;
 pub use runtime::StackRuntime;
-pub use state::{Lifecycle, RunState};
+pub use state::Lifecycle;
 pub use store::StoreCtx;
 pub use sync_drive_macro::blocking;
 

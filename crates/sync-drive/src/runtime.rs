@@ -4,11 +4,9 @@ use crate::DEFAULT_STACK_SIZE;
 use crate::ctx::SuspendCtx;
 use crate::inner::Inner;
 use crate::state::InternalLifecycle;
-use crate::state::RunState;
 use corosensei::Coroutine;
 use corosensei::stack::DefaultStack;
 use std::future::Future;
-use std::panic::resume_unwind;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
@@ -16,9 +14,6 @@ use std::task::{Context, Poll};
 /// 栈所有者。实现 `Future`，由 executor 驱动。
 pub struct StackRuntime<T> {
     coroutine: Option<Coroutine<(), (), T, DefaultStack>>,
-    /// poll 视角的状态。和 `coroutine` 的 `Some` / `None` 保持一致：
-    /// `Running` / `Done` → `Some`，`Poisoned` → `None`。
-    state: RunState,
     inner: Rc<Inner>,
 }
 
@@ -74,7 +69,6 @@ impl<T: 'static> StackRuntime<T> {
 
         Self {
             coroutine: Some(co),
-            state: RunState::Running,
             inner,
         }
     }
@@ -84,11 +78,6 @@ impl<T: 'static> StackRuntime<T> {
     /// 取回的 [`DefaultStack`] 可以传给 [`with_stack`](Self::with_stack)
     /// 复用，避免重新分配。
     ///
-    /// # 返回
-    ///
-    /// - `Some(stack)`：协程已正常完成，栈可复用。
-    /// - `None`：协程因 panic 终止，栈已随协程释放，无法回收。
-    ///
     /// # Panics
     ///
     /// 若协程尚未完成（运行中或挂起中），`corosensei` 不允许提取栈，会 panic：
@@ -97,15 +86,18 @@ impl<T: 'static> StackRuntime<T> {
     /// cannot extract stack from an incomplete coroutine
     /// ```
     ///
-    /// 调用前需先 `poll` 到 `Ready`，或 `drop` 本对象让栈随协程展开释放。
+    /// 调用前需先 `poll` 到 `Ready` 或 panic，或 `drop` 本对象让栈随协程展开释放。
     ///
     /// # 消费 `self`
     ///
     /// 调用后 `StackRuntime` 不可再用。逃逸的 [`StoreCtx`](crate::StoreCtx)
     /// 此后再调 `block_on` 会得到 `NotInResume(Done)`。
     #[must_use]
-    pub fn into_stack(mut self) -> Option<DefaultStack> {
-        self.coroutine.take().map(Coroutine::into_stack)
+    pub fn into_stack(mut self) -> DefaultStack {
+        self.coroutine
+            .take()
+            .expect("coroutine is always Some until into_stack")
+            .into_stack()
     }
 }
 
@@ -113,31 +105,14 @@ impl<T> Future for StackRuntime<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        // coroutine 在 Done 时保留（供 into_stack 取栈），在 Poisoned 时 take
-        // （panic 后不可 resume）。
         let this = self.get_mut();
 
-        match this.state {
-            RunState::Done => panic!("StackRuntime polled after completion"),
-            RunState::Poisoned => panic!("StackRuntime polled after panic"),
-            RunState::Running => {}
-        }
+        let co = this.coroutine.as_mut().expect("coroutine is always Some");
+        assert!(!co.done(), "StackRuntime polled after completion");
 
         this.inner.set_waker(cx.waker());
 
-        let co = this.coroutine.as_mut().expect("Running implies Some");
-        match this.inner.resume_once(co) {
-            Ok(Poll::Pending) => Poll::Pending,
-            Ok(Poll::Ready(t)) => {
-                this.state = RunState::Done;
-                Poll::Ready(t)
-            }
-            Err(e) => {
-                this.state = RunState::Poisoned;
-                this.coroutine.take();
-                resume_unwind(e)
-            }
-        }
+        this.inner.resume_once(co)
     }
 }
 
