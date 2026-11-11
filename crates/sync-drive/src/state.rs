@@ -9,8 +9,6 @@ pub(crate) enum InternalLifecycle {
     Waiting,
     /// 正常完成。
     Done,
-    /// panic 后。
-    Poisoned,
 }
 
 impl InternalLifecycle {
@@ -21,7 +19,6 @@ impl InternalLifecycle {
             Self::Suspendable => Lifecycle::Suspendable,
             Self::Waiting => Lifecycle::Waiting,
             Self::Done => Lifecycle::Done,
-            Self::Poisoned => Lifecycle::Poisoned,
         }
     }
 }
@@ -44,6 +41,4 @@ pub enum Lifecycle {
     Waiting,
     /// 正常完成。
     Done,
-    /// panic 后。
-    Poisoned,
 }

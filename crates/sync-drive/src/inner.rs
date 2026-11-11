@@ -6,7 +6,6 @@ use corosensei::stack::DefaultStack;
 use corosensei::{Coroutine, CoroutineResult};
 use std::cell::{Cell, OnceCell, RefCell};
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::task::{Context, Poll, Waker};
 
 /// 一条协程的执行环境。
@@ -33,7 +32,7 @@ impl Inner {
     /// # Panics
     /// 若 `waker` 未设置（`body` 执行前未 `set_waker`，属内部不变量违反）。
     #[inline]
-    pub(crate) fn get_waker(&self) -> Waker {
+    fn get_waker(&self) -> Waker {
         self.waker
             .borrow()
             .clone()
@@ -67,23 +66,19 @@ impl Inner {
     ///
     /// # Panics
     ///
-    /// 协程内 panic 会在写入 `Poisoned` 后原样传播。若协程已结束（绕过
-    /// `poll` 的 `done()` 检查直接调用），`Coroutine::resume` 会 panic。
+    /// 协程内 panic 会经 unwind 传播，`ResumeGuard` 在展开中把 `lifecycle`
+    /// 写为 `Done`。若协程已结束（绕过 `poll` 的 `done()` 检查直接调用），
+    /// `Coroutine::resume` 会 panic。
     pub(crate) fn resume_once<T>(&self, co: &mut Coroutine<(), (), T, DefaultStack>) -> Poll<T> {
         self.lifecycle.set(InternalLifecycle::Suspendable);
-        match catch_unwind(AssertUnwindSafe(|| co.resume(()))) {
-            Ok(CoroutineResult::Yield(())) => {
-                self.lifecycle.set(InternalLifecycle::Waiting);
+        let guard = ResumeGuard(&self.lifecycle);
+
+        match co.resume(()) {
+            CoroutineResult::Yield(()) => {
+                guard.commit(InternalLifecycle::Waiting);
                 Poll::Pending
             }
-            Ok(CoroutineResult::Return(t)) => {
-                self.lifecycle.set(InternalLifecycle::Done);
-                Poll::Ready(t)
-            }
-            Err(e) => {
-                self.lifecycle.set(InternalLifecycle::Poisoned);
-                resume_unwind(e)
-            }
+            CoroutineResult::Return(t) => Poll::Ready(t),
         }
     }
 
@@ -102,5 +97,22 @@ impl Inner {
     #[inline]
     pub(crate) fn current_stack_in_bounds(&self) -> bool {
         self.stack_ptr_in_bounds(psm::stack_pointer() as usize)
+    }
+}
+
+/// resume 期间的状态守卫。正常路径 `commit` 跳过，panic 时 `Drop` 兜底写 `Done`。
+struct ResumeGuard<'a>(&'a Cell<InternalLifecycle>);
+
+impl ResumeGuard<'_> {
+    /// 提交到 `Waiting`，跳过 `Drop` 兜底。
+    fn commit(self, state: InternalLifecycle) {
+        self.0.set(state);
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for ResumeGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(InternalLifecycle::Done);
     }
 }

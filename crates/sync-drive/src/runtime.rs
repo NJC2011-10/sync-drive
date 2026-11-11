@@ -126,7 +126,7 @@ impl<T> Drop for StackRuntime<T> {
             | InternalLifecycle::Waiting => {
                 self.inner.lifecycle.set(InternalLifecycle::Done);
             }
-            InternalLifecycle::Done | InternalLifecycle::Poisoned => {}
+            InternalLifecycle::Done => {}
         }
     }
 }
