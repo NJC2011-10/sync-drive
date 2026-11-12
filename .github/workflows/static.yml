@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    shell: bash --noprofile --norc -eo pipefail
+    shell: bash --noprofile --norc -eo pipefail {0}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4

@@ -21,7 +21,7 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
-    shell: bash --noprofile --norc -eo pipefail
+    shell: bash --noprofile --norc -eo pipefail {0}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
