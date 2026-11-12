@@ -118,16 +118,11 @@ impl<T> Future for StackRuntime<T> {
 
 impl<T> Drop for StackRuntime<T> {
     fn drop(&mut self) {
-        // coroutine 由 Option 自动 drop，这里只更新 lifecycle：
-        // 标记 Done 让逃逸的 StoreCtx 事后调用 block_on 得到 NotInResume(Done) 而非 UB。
-        match self.inner.lifecycle.get() {
-            InternalLifecycle::NotStarted
-            | InternalLifecycle::Suspendable
-            | InternalLifecycle::Waiting => {
-                self.inner.lifecycle.set(InternalLifecycle::Done);
-            }
-            InternalLifecycle::Done => {}
-        }
+        debug_assert!(
+            !matches!(self.inner.lifecycle.get(), InternalLifecycle::Suspendable),
+            "StackRuntime dropped during resume"
+        );
+        self.inner.lifecycle.set(InternalLifecycle::Done);
     }
 }
 

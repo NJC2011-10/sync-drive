@@ -7,7 +7,7 @@ pub(crate) enum InternalLifecycle {
     Suspendable,
     /// 已挂起，等待 waker 唤醒。
     Waiting,
-    /// 正常完成。
+    /// 已结束。协程不再可被驱动，也不再可挂起。
     Done,
 }
 
@@ -30,7 +30,7 @@ fn not_started_unreachable() -> ! {
     unreachable!("InternalLifecycle::NotStarted is not observable from outside")
 }
 
-/// 协程的生命周期状态。外部可观察的四种状态。
+/// 协程的生命周期状态。
 ///
 /// 调用 `lifecycle()` 时协程一定已启动，因此不存在“未启动”变体。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +39,6 @@ pub enum Lifecycle {
     Suspendable,
     /// 已挂起，等待 waker 唤醒。
     Waiting,
-    /// 正常完成。
+    /// 已结束。协程不再可被驱动，也不再可挂起。
     Done,
 }
