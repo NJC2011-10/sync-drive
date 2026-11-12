@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    shell: bash --noprofile --norc -eo pipefail
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -23,7 +24,7 @@ jobs:
         run: cargo doc --workspace --no-deps --all-features
 
       - name: Copy custom root docs
-        run: cp -r doc/ target/doc/
+        run: rsync -av doc/ target/doc/
 
       - name: Zip docs
         run: cd target/doc && zip -r ../doc.zip .
