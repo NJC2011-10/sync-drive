@@ -22,10 +22,22 @@ jobs:
       - name: Build rustdoc
         run: cargo doc --workspace --no-deps --all-features
 
-      - name: Upload docs artifact
+      - name: Copy custom root docs
+        run: cp -r doc/ target/doc/
+
+      - name: Zip docs
+        run: cd target/doc && zip -r ../doc.zip .
+
+      - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: target/doc
+
+      - name: Upload zip archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdoc-zip
+          path: target/doc.zip
 
   deploy:
     needs: build
