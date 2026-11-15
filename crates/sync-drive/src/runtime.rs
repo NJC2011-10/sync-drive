@@ -3,7 +3,6 @@
 use crate::DEFAULT_STACK_SIZE;
 use crate::ctx::SuspendCtx;
 use crate::inner::Inner;
-use crate::state::InternalLifecycle;
 use corosensei::Coroutine;
 use corosensei::stack::DefaultStack;
 use std::future::Future;
@@ -45,6 +44,7 @@ impl<T: 'static> StackRuntime<T> {
     ///
     /// # Panics
     /// 若内部构造逻辑被破坏（不应发生）。
+    #[must_use]
     pub fn with_stack<F>(body: F, stack: DefaultStack) -> Self
     where
         F: FnOnce(SuspendCtx<'_>) -> T + 'static,
@@ -52,20 +52,13 @@ impl<T: 'static> StackRuntime<T> {
         let inner = Rc::new(Inner::new());
         let inner_for_co = inner.clone();
         let co = Coroutine::with_stack(stack, move |yielder, ()| {
-            body(SuspendCtx {
-                yielder,
-                inner: inner_for_co,
-            })
+            body(SuspendCtx::from_parts(yielder, inner_for_co))
         });
 
         // trap_handler 带泛型 T，Inner 不带 T——用 Box<dyn Fn> 擦除后存入，
         // 供 StoreCtx 的 SP 检查使用。
         let handler = co.trap_handler();
-        inner
-            .trap_check
-            .set(Box::new(move |sp| handler.stack_ptr_in_bounds(sp)))
-            .ok()
-            .expect("trap_check set exactly once at construction");
+        inner.set_trap_check(Box::new(move |sp| handler.stack_ptr_in_bounds(sp)));
 
         Self {
             coroutine: Some(co),
@@ -91,13 +84,23 @@ impl<T: 'static> StackRuntime<T> {
     /// # 消费 `self`
     ///
     /// 调用后 `StackRuntime` 不可再用。逃逸的 [`StoreCtx`](crate::StoreCtx)
-    /// 此后再调 `block_on` 会得到 `NotInResume(Done)`。
+    /// 此后再调 `block_on` 会得到 `NotInResume`。
     #[must_use]
     pub fn into_stack(mut self) -> DefaultStack {
         self.coroutine
             .take()
             .expect("coroutine is always Some until into_stack")
             .into_stack()
+    }
+
+    /// 获取协程的只读查询视图
+    ///
+    /// 如果协程已经被取出/销毁，返回 [`None`]。
+    /// 仅用于状态查询（如 `is_done`），**不允许用来驱动协程**（无法拿到 `&mut`）。
+    #[inline]
+    #[must_use]
+    pub fn coroutine(&self) -> Option<&Coroutine<(), (), T, DefaultStack>> {
+        self.coroutine.as_ref()
     }
 }
 
@@ -119,10 +122,9 @@ impl<T> Future for StackRuntime<T> {
 impl<T> Drop for StackRuntime<T> {
     fn drop(&mut self) {
         debug_assert!(
-            !matches!(self.inner.lifecycle.get(), InternalLifecycle::Suspendable),
+            !self.inner.is_in_resume(),
             "StackRuntime dropped during resume"
         );
-        self.inner.lifecycle.set(InternalLifecycle::Done);
     }
 }
 

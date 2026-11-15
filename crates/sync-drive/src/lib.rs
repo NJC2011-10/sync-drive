@@ -7,15 +7,15 @@ mod error;
 mod handle;
 mod inner;
 mod runtime;
-mod state;
 mod store;
 
+pub use corosensei::Coroutine;
 pub use corosensei::stack::DefaultStack;
 pub use ctx::SuspendCtx;
 pub use error::SuspendError;
 pub use handle::SuspendHandle;
+pub use inner::Inner;
 pub use runtime::StackRuntime;
-pub use state::Lifecycle;
 pub use store::StoreCtx;
 
 #[cfg(feature = "macros")]

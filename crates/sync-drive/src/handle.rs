@@ -1,16 +1,15 @@
 use crate::error::SuspendError;
 use crate::inner::Inner;
-use crate::state::Lifecycle;
 use corosensei::Yielder;
 use std::future::Future;
 
 /// 能力 trait：句柄只实现这个。`pub(crate)` 可见但不导出到 crate 外，
 /// 对 `impl<H: SuspendCapability> SuspendHandle for H` 的 blanket impl 可见。
 pub(crate) trait SuspendCapability {
+    #[must_use]
     fn inner(&self) -> &Inner;
     fn with_yielder<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError>;
 
-    #[inline]
     fn suspend_with<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError> {
         if std::thread::panicking() {
             return Err(SuspendError::Panicking);
@@ -60,9 +59,6 @@ pub trait SuspendHandle {
     /// 意味着库的构造逻辑被绕过，应报 issue。`Err` 不覆盖此类失败。
     fn try_block_on<F: Future>(&self, f: F) -> Result<F::Output, SuspendError>;
 
-    /// 当前协程的生命周期状态。
-    fn lifecycle(&self) -> Lifecycle;
-
     /// 在父栈上执行闭包。
     ///
     /// 闭包执行期间协程仍处于可挂起状态，但执行栈位于父栈。若经
@@ -77,21 +73,13 @@ pub trait SuspendHandle {
         F: FnOnce() -> R + Send,
         R: Send;
 
-    /// 当前执行栈是否属于本协程。
-    ///
-    /// 在 `on_parent_stack` 闭包内、或通过 `unsafe` 跨栈调用时返回 `false`。
-    fn is_on_coroutine_stack(&self) -> bool;
+    /// 给出信息查询接口。
+    #[must_use]
+    fn inner(&self) -> &Inner;
 }
 
 /// 为所有可挂起句柄实现 `SuspendHandle`。
 impl<H: SuspendCapability> SuspendHandle for H {
-    #[inline]
-    fn block_on<F: Future>(&self, f: F) -> F::Output {
-        self.inner()
-            .run_until_ready(f, || self.suspend_with(|y| y.suspend(())))
-            .unwrap_or_else(|e| unreachable_suspend("block_on", e))
-    }
-
     #[inline]
     fn try_block_on<F: Future>(&self, f: F) -> Result<F::Output, SuspendError> {
         self.inner()
@@ -99,8 +87,9 @@ impl<H: SuspendCapability> SuspendHandle for H {
     }
 
     #[inline]
-    fn lifecycle(&self) -> Lifecycle {
-        self.inner().lifecycle.get().to_public()
+    fn block_on<F: Future>(&self, f: F) -> F::Output {
+        self.try_block_on(f)
+            .unwrap_or_else(|e| panic!("block_on: {e}"))
     }
 
     #[inline]
@@ -110,20 +99,11 @@ impl<H: SuspendCapability> SuspendHandle for H {
         R: Send,
     {
         self.suspend_with(|y| y.on_parent_stack(f))
-            .unwrap_or_else(|e| unreachable_suspend("on_parent_stack", e))
+            .unwrap_or_else(|e| panic!("on_parent_stack: {e}"))
     }
 
     #[inline]
-    fn is_on_coroutine_stack(&self) -> bool {
-        self.inner().current_stack_in_bounds()
+    fn inner(&self) -> &Inner {
+        self.inner()
     }
-}
-
-/// 调用者违反挂起契约时的终止。
-///
-/// `SuspendError::Panicking` 意味着当前在 unwind 中：若 `block_on` 被
-/// `catch_unwind` 包裹，panic 被捕获；否则 double panic 后由 Rust 运行时 abort。
-#[cold]
-fn unreachable_suspend(api: &str, e: SuspendError) -> ! {
-    panic!("{api}: {e}");
 }

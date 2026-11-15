@@ -1,37 +1,45 @@
 //! 协程执行环境与两个方向的驱动逻辑。
 
 use crate::error::SuspendError;
-use crate::state::InternalLifecycle;
 use corosensei::stack::DefaultStack;
 use corosensei::{Coroutine, CoroutineResult};
 use std::cell::{Cell, OnceCell, RefCell};
 use std::future::Future;
 use std::task::{Context, Poll, Waker};
 
+type TrapCheckFn = Box<dyn Fn(usize) -> bool>;
+
 /// 一条协程的执行环境。
-pub(crate) struct Inner {
-    pub(crate) waker: RefCell<Option<Waker>>,
-    pub(crate) lifecycle: Cell<InternalLifecycle>,
-    pub(crate) trap_check: OnceCell<Box<dyn Fn(usize) -> bool>>,
+pub struct Inner {
+    waker: RefCell<Option<Waker>>,
+    in_resume: Cell<bool>,
+    trap_check: OnceCell<TrapCheckFn>,
 }
 
 impl Inner {
+    #[must_use]
     pub(crate) fn new() -> Self {
         Self {
             waker: RefCell::new(None),
-            lifecycle: Cell::new(InternalLifecycle::NotStarted),
+            in_resume: Cell::new(false),
             trap_check: OnceCell::new(),
         }
     }
 
-    #[inline]
+    pub(crate) fn set_trap_check(&self, trap_check: TrapCheckFn) {
+        self.trap_check
+            .set(trap_check)
+            .ok()
+            .expect("trap_check set exactly once at construction");
+    }
+
     pub(crate) fn set_waker(&self, w: &Waker) {
         *self.waker.borrow_mut() = Some(w.clone());
     }
 
     /// # Panics
     /// 若 `waker` 未设置（`body` 执行前未 `set_waker`，属内部不变量违反）。
-    #[inline]
+    #[must_use]
     fn get_waker(&self) -> Waker {
         self.waker
             .borrow()
@@ -66,28 +74,25 @@ impl Inner {
     ///
     /// # Panics
     ///
-    /// 协程内 panic 会经 unwind 传播，`ResumeGuard` 在展开中把 `lifecycle`
-    /// 写为 `Done`。若协程已结束（绕过 `poll` 的 `done()` 检查直接调用），
-    /// `Coroutine::resume` 会 panic。
+    /// 协程内 panic 会经传播，`ResumeGuard` 在展开时把 `in_resume` 设为 `false`
     pub(crate) fn resume_once<T>(&self, co: &mut Coroutine<(), (), T, DefaultStack>) -> Poll<T> {
-        self.lifecycle.set(InternalLifecycle::Suspendable);
-        let guard = ResumeGuard(&self.lifecycle);
+        let _guard = ResumeGuard::new(&self.in_resume);
 
         match co.resume(()) {
-            CoroutineResult::Yield(()) => {
-                guard.commit(InternalLifecycle::Waiting);
-                Poll::Pending
-            }
+            CoroutineResult::Yield(()) => Poll::Pending,
             CoroutineResult::Return(t) => Poll::Ready(t),
         }
     }
 
     /// 指定 SP 是否在本协程栈范围内（含 guard page）。
     ///
+    /// 具体含义请看
+    ///
     /// # Panics
     /// 若 `trap_check` 未初始化（构造逻辑错误，不应发生）。
     #[inline]
-    pub(crate) fn stack_ptr_in_bounds(&self, sp: usize) -> bool {
+    #[must_use]
+    pub fn stack_ptr_in_bounds(&self, sp: usize) -> bool {
         self.trap_check
             .get()
             .expect("trap_check set exactly once at construction")(sp)
@@ -95,24 +100,32 @@ impl Inner {
 
     /// 当前执行栈是否在本协程栈范围内。
     #[inline]
-    pub(crate) fn current_stack_in_bounds(&self) -> bool {
+    #[must_use]
+    pub fn current_stack_in_bounds(&self) -> bool {
         self.stack_ptr_in_bounds(psm::stack_pointer() as usize)
+    }
+
+    /// 是否处在一次 `resume` 中。
+    #[inline]
+    #[must_use]
+    pub fn is_in_resume(&self) -> bool {
+        self.in_resume.get()
     }
 }
 
-/// resume 期间的状态守卫。正常路径 `commit` 跳过，panic 时 `Drop` 兜底写 `Done`。
-struct ResumeGuard<'a>(&'a Cell<InternalLifecycle>);
+/// resume 期间的状态守卫。存活期间 `in_resume` 设为 `true`。
+#[must_use]
+struct ResumeGuard<'a>(&'a Cell<bool>);
 
-impl ResumeGuard<'_> {
-    /// 提交到 `Waiting`，跳过 `Drop` 兜底。
-    fn commit(self, state: InternalLifecycle) {
-        self.0.set(state);
-        std::mem::forget(self);
+impl<'a> ResumeGuard<'a> {
+    fn new(in_resume: &'a Cell<bool>) -> Self {
+        in_resume.set(true);
+        Self(in_resume)
     }
 }
 
 impl Drop for ResumeGuard<'_> {
     fn drop(&mut self) {
-        self.0.set(InternalLifecycle::Done);
+        self.0.set(false);
     }
 }

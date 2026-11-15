@@ -5,22 +5,26 @@ use crate::handle::SuspendCapability;
 use crate::inner::Inner;
 use crate::store::StoreCtx;
 use corosensei::Yielder;
-use std::ptr::NonNull;
 use std::rc::Rc;
 
 /// 挂起能力的轻量句柄。只在 `body` 调用期间有效，不可克隆。
 pub struct SuspendCtx<'a> {
-    pub(crate) yielder: &'a Yielder<(), ()>,
-    pub(crate) inner: Rc<Inner>,
+    yielder: &'a Yielder<(), ()>,
+    inner: Rc<Inner>,
+}
+
+impl<'a> SuspendCtx<'a> {
+    #[must_use]
+    pub(crate) fn from_parts(yielder: &'a Yielder<(), ()>, inner: Rc<Inner>) -> Self {
+        Self { yielder, inner }
+    }
 }
 
 impl SuspendCapability for SuspendCtx<'_> {
-    #[inline]
     fn inner(&self) -> &Inner {
         &self.inner
     }
 
-    #[inline]
     fn with_yielder<R>(&self, f: impl FnOnce(&Yielder<(), ()>) -> R) -> Result<R, SuspendError> {
         Ok(f(self.yielder))
     }
@@ -31,9 +35,6 @@ impl SuspendCtx<'_> {
     #[inline]
     #[must_use]
     pub fn to_store(&self) -> StoreCtx {
-        StoreCtx {
-            yielder: NonNull::from(self.yielder),
-            inner: self.inner.clone(),
-        }
+        StoreCtx::from_parts(self.yielder, self.inner.clone())
     }
 }

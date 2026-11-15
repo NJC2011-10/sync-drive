@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::task::Context;
-use sync_drive::{Lifecycle, StackRuntime, StoreCtx, SuspendError, SuspendHandle};
+use sync_drive::{StackRuntime, StoreCtx, SuspendError, SuspendHandle};
 
 #[test]
 fn block_on_after_completion_panics() {
@@ -89,21 +89,21 @@ fn try_block_on_returns_err_instead_of_panic() {
     let store = slot.borrow().clone().unwrap();
     match store.try_block_on(std::future::pending::<()>()) {
         Ok(()) => panic!("should return Err"),
-        Err(SuspendError::NotInResume(Lifecycle::Done)) => {}
+        Err(SuspendError::NotInResume) => {}
         Err(e) => panic!("unexpected: {e}"),
     }
 }
 
 #[test]
 fn lifecycle_reflects_state() {
-    let captured: Rc<Cell<Option<Lifecycle>>> = Rc::new(Cell::new(None));
+    let captured: Rc<Cell<Option<bool>>> = Rc::new(Cell::new(None));
     let c = captured.clone();
     let rt = StackRuntime::new(move |ctx| {
-        c.set(Some(ctx.lifecycle()));
+        c.set(Some(ctx.inner().is_in_resume()));
     })
     .unwrap();
     block_on(rt);
-    assert_eq!(captured.get(), Some(Lifecycle::Suspendable));
+    assert_eq!(captured.get(), Some(true));
 }
 
 #[test]
@@ -135,11 +135,14 @@ fn cross_coroutine_via_on_parent_stack() {
 #[test]
 fn is_on_coroutine_stack_reflects_sp() {
     let rt = StackRuntime::new(|ctx| {
-        assert!(ctx.is_on_coroutine_stack(), "协程栈上应为 true");
+        assert!(ctx.inner().current_stack_in_bounds(), "协程栈上应为 true");
         let store = SendStore(ctx.to_store());
         ctx.on_parent_stack(move || {
             let store = store;
-            assert!(!store.0.is_on_coroutine_stack(), "父栈上应为 false");
+            assert!(
+                !store.0.inner().current_stack_in_bounds(),
+                "父栈上应为 false"
+            );
         });
     })
     .unwrap();
